@@ -1,0 +1,21 @@
+{
+  "file_format_version" : "1.0.0",
+  "layer" : {
+    "name": "VK_LAYER_PRIMUS_PrimusVK",
+    "type": "GLOBAL",
+    "library_path": "libprimus_vk.so",
+    "api_version": "1.0.0",
+    "implementation_version": "1",
+    "description": "Primus-vk - https://github.com/felixdoerre/primus_vk",
+    "functions": {
+      "vkGetInstanceProcAddr": "PrimusVK_GetInstanceProcAddr",
+      "vkGetDeviceProcAddr": "PrimusVK_GetDeviceProcAddr"
+    },
+    "enable_environment": {
+      "ENABLE_PRIMUS_LAYER": "1"
+    },
+    "disable_environment": {
+      "DISABLE_PRIMUS_LAYER": "1"
+    }
+  }
+}
