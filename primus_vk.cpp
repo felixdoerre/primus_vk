@@ -14,6 +14,8 @@
 
 #include <pthread.h>
 
+#include <stdexcept>
+
 #undef VK_LAYER_EXPORT
 #if defined(WIN32)
 #define VK_LAYER_EXPORT extern "C" __declspec(dllexport)
@@ -160,6 +162,8 @@ struct FramebufferImage {
   VkDeviceMemory mem;
 
   VkDevice device;
+
+  std::shared_ptr<MappedMemory> mapped;
   FramebufferImage(VkDevice device, VkExtent2D size, VkImageTiling tiling, VkImageUsageFlags usage, int memoryTypeIndex): device(device){
     VkImageCreateInfo imageCreateCI {};
     imageCreateCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -184,8 +188,14 @@ struct FramebufferImage {
     VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &mem));
     VK_CHECK_RESULT(vkBindImageMemory(device, img, mem, 0));
   }
-  std::shared_ptr<MappedMemory> map(){
-    return std::make_shared<MappedMemory>(device, *this);
+  std::shared_ptr<MappedMemory> getMapped(){
+    if(!mapped){
+      throw std::runtime_error("not mapped");
+    }
+    return mapped;
+  }
+  void map(){
+    mapped = std::make_shared<MappedMemory>(device, *this);
   }
   VkSubresourceLayout getLayout(){
     VkImageSubresource subResource { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
@@ -572,6 +582,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
     displaySrcImage = std::make_shared<FramebufferImage>(display_gpu, pCreateInfo->imageExtent,
 	VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT, display_host_mem);
 
+    renderCopyImage->map();
+    displaySrcImage->map();
+
     CommandBuffer cmd{ch->display_device};
     cmd.insertImageMemoryBarrier(
 			   displaySrcImage->img,
@@ -688,7 +701,7 @@ std::shared_ptr<MappedMemory> MySwapchain::storeImage(uint32_t index, VkDevice d
      
     VkSubresourceLayout subResourceLayout = cpyImage->getLayout();
     // Map image memory so we can start copying from it
-    auto mapped = cpyImage->map();
+    auto mapped = cpyImage->getMapped();
     const char* data = mapped->data + subResourceLayout.offset;
     return mapped;
 }
@@ -698,7 +711,7 @@ void MySwapchain::copyImageData(uint32_t index){
   auto target = storeImage(index, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM);
 
   {
-    auto mapped = display_src_images[index]->map();
+    auto mapped = display_src_images[index]->getMapped();
 
     auto start = std::chrono::steady_clock::now();
     memcpy(mapped->data, target->data, 4*imgSize.width*imgSize.height);
