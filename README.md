@@ -47,7 +47,7 @@ Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the pat
 
 ## Howto
 
-1. Compile Primus-vk and `libnv_vulkan_wrapper.so` (check that the path to the nvidia-driver in `nv_vulkan_wrapper.so` is correct).
+1. Use `make libprimus_vk.so libnv_vulkan_wrapper.so` to compile Primus-vk and `libnv_vulkan_wrapper.so` (check that the path to the nvidia-driver in `nv_vulkan_wrapper.so` is correct).
 2. Patch path in `/usr/share/vulkan/icd.d/nvidia_icd.json` to point to the compiled `libnv_vulkan_wrapper.so`.
 3. Install `primus_vk.json` and adjust path.
 4. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
