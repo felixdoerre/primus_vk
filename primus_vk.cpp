@@ -34,7 +34,13 @@ void *GetKey(DispatchableType inst)
   return *(void **)inst;
 }
 
+struct InstanceInfo {
+  VkPhysicalDevice render;
+  VkPhysicalDevice display;
+};
+
 std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
+std::map<void *, InstanceInfo> instance_info;
 std::map<void *, VkLayerDispatchTable> device_dispatch;
 std::map<void *, VkPhysicalDevice> render_to_display;
 std::map<void *, VkDevice> render_to_display_instance;
@@ -133,6 +139,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   {
     scoped_lock l(global_lock);
     instance_dispatch[GetKey(*pInstance)] = dispatchTable;
+    instance_info[GetKey(*pInstance)] = InstanceInfo{.render = render, .display=display};
   }
 
   return VK_SUCCESS;
@@ -882,6 +889,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
     VkInstance                                  instance,
     uint32_t*                                   pPhysicalDeviceCount,
     VkPhysicalDevice*                           pPhysicalDevices){
+  InstanceInfo &info = instance_info[GetKey(instance)];
   int cnt = 1;
   if(list_all_gpus) cnt = 2;
   if(pPhysicalDevices == nullptr){
@@ -894,10 +902,10 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
   std::vector<VkPhysicalDevice> vec{*pPhysicalDeviceCount};
   res = instance_dispatch[GetKey(instance)].EnumeratePhysicalDevices(instance, pPhysicalDeviceCount, vec.data());
   if(res != VK_SUCCESS) return res;
-  pPhysicalDevices[0] = vec[0];
+  pPhysicalDevices[0] = info.render;
   *pPhysicalDeviceCount = cnt;
   if(cnt >= 2){
-    pPhysicalDevices[1] = vec[1];
+    pPhysicalDevices[1] = info.display;
   }
   return res;
 }
