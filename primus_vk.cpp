@@ -42,6 +42,7 @@ std::map<void *, VkDevice> render_to_display_instance;
 VkInstance the_instance;
 
 #define TRACE(x) std::cout << "PrimusVK: " << x;
+#define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x;
 // #define TRACE(x)
 #define TRACE_FRAME(x)
 
@@ -715,7 +716,7 @@ void MySwapchain::copyImageData(uint32_t index){
 
     auto start = std::chrono::steady_clock::now();
     memcpy(mapped->data, target->data, 4*imgSize.width*imgSize.height);
-    TRACE("Time for plain memcpy: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds\n");
+    TRACE_PROFILING("Time for plain memcpy: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds\n");
   }
 
   if(display_commands[index] == nullptr){
@@ -758,6 +759,8 @@ void MySwapchain::copyImageData(uint32_t index){
 
 }
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
+  const auto start = std::chrono::steady_clock::now();
+
   MySwapchain *ch = reinterpret_cast<MySwapchain*>(pPresentInfo->pSwapchains[0]);
 
   VkPresentInfoKHR p2 = *pPresentInfo;
@@ -777,6 +780,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, cons
   ch->copyImageData(index);
   
   TRACE_FRAME("Swapchain QueuePresent: #semaphores: " << pPresentInfo->waitSemaphoreCount << ", #chains: " << pPresentInfo->swapchainCount << ", imageIndex: " << *pPresentInfo->pImageIndices << "\n");
+  TRACE_PROFILING("Own time for present: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds\n");
   VkResult res = device_dispatch[GetKey(ch->display_queue)].QueuePresentKHR(ch->display_queue, &p2);
   return res;
 }
