@@ -16,6 +16,11 @@ Additinonally, only images with `VK_IMAGE_TILING_OPTIMAL` can be rendered to and
 
 An idea might be to use `VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT` to map one device's memory and use that directly on the other device (or import host-allocated memory on both devices). However that is not implemented yet.
 
+## Development Status
+
+This layer works for the applications I tested it with, but has still some technical difficulties (see Technical Limitations). Additionally the image copy still introduces too much overhead.
+However this layer should already be usable with most applications.
+
 ## Technical Limitations
 
 1. The layer might deadlock on swapchain creation. I currently have no easy way to fix this. However real applications (and not demos) tend to spend enough time between `vkCreateDevice` and `vkCreateSwapchainKHR` that this deadlock never occurs. This is due to the vk_layer limitation that creating dispatchable objects is quite complex. I have the problem, that I need a new `VkDevice` from a `VkPhysicalDevice` where the application never calls `vkCreateDevice` upon. So the code from the Vulkan Loader that builds the layer/ICD chain is only executed once. The only way to call it again is to call the Loader again which might deadlock in the Loader global lock.
