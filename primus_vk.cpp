@@ -197,15 +197,15 @@ struct FramebufferImage {
     imageCreateCI.samples = VK_SAMPLE_COUNT_1_BIT;
     imageCreateCI.tiling = tiling;
     imageCreateCI.usage = usage;
-    VK_CHECK_RESULT(vkCreateImage(device, &imageCreateCI, nullptr, &img));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateImage(device, &imageCreateCI, nullptr, &img));
 
     VkMemoryRequirements memRequirements {};
     VkMemoryAllocateInfo memAllocInfo {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    vkGetImageMemoryRequirements(device, img, &memRequirements);
+    device_dispatch[GetKey(device)].GetImageMemoryRequirements(device, img, &memRequirements);
     memAllocInfo.allocationSize = memRequirements.size;
     memAllocInfo.memoryTypeIndex = memoryTypeIndex;
-    VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &mem));
-    VK_CHECK_RESULT(vkBindImageMemory(device, img, mem, 0));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].AllocateMemory(device, &memAllocInfo, nullptr, &mem));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].BindImageMemory(device, img, mem, 0));
   }
   std::shared_ptr<MappedMemory> getMapped(){
     if(!mapped){
@@ -219,19 +219,19 @@ struct FramebufferImage {
   VkSubresourceLayout getLayout(){
     VkImageSubresource subResource { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
     VkSubresourceLayout subResourceLayout;
-    vkGetImageSubresourceLayout(device, img, &subResource, &subResourceLayout);
+    device_dispatch[GetKey(device)].GetImageSubresourceLayout(device, img, &subResource, &subResourceLayout);
     return subResourceLayout;
   }
   ~FramebufferImage(){
-    vkFreeMemory(device, mem, nullptr);
-    vkDestroyImage(device, img, nullptr);
+    device_dispatch[GetKey(device)].FreeMemory(device, mem, nullptr);
+    device_dispatch[GetKey(device)].DestroyImage(device, img, nullptr);
   }
 };
 MappedMemory::MappedMemory(VkDevice device, FramebufferImage &img): device(device), mem(img.mem){
-  vkMapMemory(device, img.mem, 0, VK_WHOLE_SIZE, 0, (void**)&data);
+  device_dispatch[GetKey(device)].MapMemory(device, img.mem, 0, VK_WHOLE_SIZE, 0, (void**)&data);
 }
 MappedMemory::~MappedMemory(){
-  vkUnmapMemory(device, mem);
+  device_dispatch[GetKey(device)].UnmapMemory(device, mem);
 }
 class CommandBuffer;
 struct MySwapchain{
@@ -353,16 +353,16 @@ public:
   VkCommandBuffer cmd;
   CommandBuffer(VkDevice device) : device(device) {
     VkCommandPoolCreateInfo poolInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = 0 };
-    VK_CHECK_RESULT(vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateCommandPool(device, &poolInfo, nullptr, &commandPool));
     VkCommandBufferAllocateInfo cmdBufAllocateInfo = {.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool=commandPool, .level=VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
   
-    VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &cmd));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].AllocateCommandBuffers(device, &cmdBufAllocateInfo, &cmd));
   
     VkCommandBufferBeginInfo cmdBufInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    VK_CHECK_RESULT(vkBeginCommandBuffer(cmd, &cmdBufInfo));
+    VK_CHECK_RESULT(device_dispatch[GetKey(cmd)].BeginCommandBuffer(cmd, &cmdBufInfo));
   }
   ~CommandBuffer(){
-    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+    device_dispatch[GetKey(device)].FreeCommandBuffers(device, commandPool, 1, &cmd);
   }
   void insertImageMemoryBarrier(
 			      VkImage image,
@@ -381,7 +381,7 @@ public:
     imageMemoryBarrier.image = image;
     imageMemoryBarrier.subresourceRange = subresourceRange;
     
-    vkCmdPipelineBarrier(
+    device_dispatch[GetKey(device)].CmdPipelineBarrier(
 			 cmd,
 			 srcStageMask,
 			 dstStageMask,
@@ -401,7 +401,7 @@ public:
     imageCopyRegion.extent.depth = 1;
  
     // Issue the copy command
-    vkCmdCopyImage(
+    device_dispatch[GetKey(device)].CmdCopyImage(
 		   cmd,
 		   src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		   dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -409,7 +409,7 @@ public:
 		   &imageCopyRegion);
   }
   void end(){
-    VK_CHECK_RESULT(vkEndCommandBuffer(cmd));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].EndCommandBuffer(cmd));
   }
   void submit(VkQueue queue, VkFence fence){
     VkSubmitInfo submitInfo = {.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -427,14 +427,14 @@ public:
   Fence(VkDevice dev): device(dev){
     // Create fence to ensure that the command buffer has finished executing
     VkFenceCreateInfo fenceInfo = {.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags=0};
-    VK_CHECK_RESULT(vkCreateFence(device, &fenceInfo, nullptr, &fence));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateFence(device, &fenceInfo, nullptr, &fence));
   }
   void await(){
     // Wait for the fence to signal that command buffer has finished executing
-    VK_CHECK_RESULT(vkWaitForFences(device, 1, &fence, VK_TRUE, 10000000000L));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].WaitForFences(device, 1, &fence, VK_TRUE, 10000000000L));
   }
   ~Fence(){
-    vkDestroyFence(device, fence, nullptr);
+    device_dispatch[GetKey(device)].DestroyFence(device, fence, nullptr);
   }
 };
 
@@ -519,22 +519,52 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   TRACE("fetching dispatch for " << GetKey(*pDevice) << "\n");
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerDispatchTable dispatchTable;
-  dispatchTable.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gdpa(*pDevice, "vkGetDeviceProcAddr");
-  dispatchTable.DestroyDevice = (PFN_vkDestroyDevice)gdpa(*pDevice, "vkDestroyDevice");
-  dispatchTable.BeginCommandBuffer = (PFN_vkBeginCommandBuffer)gdpa(*pDevice, "vkBeginCommandBuffer");
-  dispatchTable.CmdDraw = (PFN_vkCmdDraw)gdpa(*pDevice, "vkCmdDraw");
-  dispatchTable.CmdDrawIndexed = (PFN_vkCmdDrawIndexed)gdpa(*pDevice, "vkCmdDrawIndexed");
-  dispatchTable.EndCommandBuffer = (PFN_vkEndCommandBuffer)gdpa(*pDevice, "vkEndCommandBuffer");
+#define FETCH(x) dispatchTable.x = (PFN_vk##x)gdpa(*pDevice, #x);
+  FETCH(GetDeviceProcAddr);
+  TRACE("GetDeviceProcAddr is: " << (void*) dispatchTable.GetDeviceProcAddr << "\n");
+  FETCH(DestroyDevice);
+  FETCH(BeginCommandBuffer);
+  FETCH(CmdDraw);
+  FETCH(CmdDrawIndexed);
+  FETCH(EndCommandBuffer);
 
-  dispatchTable.CreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)gdpa(*pDevice, "vkCreateSwapchainKHR");
+  FETCH(CreateSwapchainKHR);
   TRACE("Create Swapchain KHR is: " << (void*) dispatchTable.CreateSwapchainKHR << "\n");
-  dispatchTable.DestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)gdpa(*pDevice, "vkDestroySwapchainKHR");
-  dispatchTable.GetSwapchainImagesKHR = (PFN_vkGetSwapchainImagesKHR)gdpa(*pDevice, "vkGetSwapchainImagesKHR");
-  dispatchTable.AcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)gdpa(*pDevice, "vkAcquireNextImageKHR");
-  dispatchTable.QueuePresentKHR = (PFN_vkQueuePresentKHR)gdpa(*pDevice, "vkQueuePresentKHR");
+  FETCH(DestroySwapchainKHR);
+  FETCH(GetSwapchainImagesKHR);
+  FETCH(AcquireNextImageKHR);
+  FETCH(QueuePresentKHR);
 
-  dispatchTable.CreateImage = (PFN_vkCreateImage)gdpa(*pDevice, "vkCreateImage");
+  FETCH(CreateImage);
+  FETCH(GetImageMemoryRequirements);
+  FETCH(AllocateMemory);
+  FETCH(BindImageMemory);
+  FETCH(GetImageSubresourceLayout);
+  FETCH(FreeMemory);
+  FETCH(DestroyImage);
+  FETCH(MapMemory);
+  FETCH(UnmapMemory);
 
+
+  FETCH(AllocateCommandBuffers);
+  FETCH(BeginCommandBuffer);
+  FETCH(CmdCopyImage);
+  FETCH(CmdPipelineBarrier);
+  FETCH(CreateCommandPool);
+  //FETCH(CreateDevice);
+  FETCH(EndCommandBuffer);
+  //FETCH(EnumeratePhysicalDevices);
+  FETCH(FreeCommandBuffers);
+  //FETCH(GetPhysicalDeviceMemoryProperties);
+  //FETCH(GetPhysicalDeviceQueueFamilyProperties);
+  FETCH(QueueSubmit);
+  
+  FETCH(GetDeviceQueue);
+
+  FETCH(CreateFence);
+  FETCH(WaitForFences);
+  FETCH(DestroyFence);
+#undef FETCH
   return dispatchTable;
 }
 
@@ -577,8 +607,8 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   MySwapchain *ch = new MySwapchain();
   ch->display_device = display_gpu;
   // TODO automatically find correct queue and not choose 0 forcibly
-  vkGetDeviceQueue(render_gpu, 0, 0, &ch->render_queue);
-  vkGetDeviceQueue(display_gpu, 0, 0, &ch->display_queue);
+  device_dispatch[GetKey(render_gpu)].GetDeviceQueue(render_gpu, 0, 0, &ch->render_queue);
+  device_dispatch[GetKey(display_gpu)].GetDeviceQueue(display_gpu, 0, 0, &ch->display_queue);
   ch->device = render_gpu;
   ch->render_images.resize(pCreateInfo->minImageCount);
   ch->render_copy_images.resize(pCreateInfo->minImageCount);
