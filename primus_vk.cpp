@@ -16,6 +16,12 @@
 
 #include <stdexcept>
 
+#include <dlfcn.h>
+
+#include <vector>
+#include <memory>
+#include <thread>
+
 #undef VK_LAYER_EXPORT
 #if defined(WIN32)
 #define VK_LAYER_EXPORT extern "C" __declspec(dllexport)
@@ -40,12 +46,15 @@ struct InstanceInfo {
 };
 
 std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
+VkLayerInstanceDispatchTable loader_dispatch;
 std::map<void *, InstanceInfo> instance_info;
 std::map<void *, VkLayerDispatchTable> device_dispatch;
 std::map<VkPhysicalDevice, VkPhysicalDevice> render_to_display;
 std::map<VkDevice, VkDevice> render_to_display_instance;
 
 VkInstance the_instance;
+std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
+
 
 #define TRACE(x) std::cout << "PrimusVK: " << x;
 #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x;
@@ -148,10 +157,17 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   FORWARD(GetPhysicalDeviceSurfacePresentModesKHR);
 #undef FORWARD
 
+#define _FORWARD(x) loader_dispatch.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
+  _FORWARD(CreateDevice);
+  _FORWARD(EnumeratePhysicalDevices);
+  _FORWARD(GetPhysicalDeviceMemoryProperties);
+  _FORWARD(GetPhysicalDeviceQueueFamilyProperties);
+#undef _FORWARD
+
   // store the table by key
   {
     scoped_lock l(global_lock);
-    instance_dispatch[GetKey(*pInstance)] = dispatchTable;
+    instance_dispatch[GetKey(the_instance)] = dispatchTable;
     instance_info[GetKey(*pInstance)] = InstanceInfo{.render = render, .display=display};
   }
 
@@ -163,10 +179,6 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, co
   scoped_lock l(global_lock);
   instance_dispatch.erase(GetKey(instance));
 }
-
-#include <vector>
-#include <memory>
-#include <thread>
 
 struct FramebufferImage;
 struct MappedMemory{
@@ -271,21 +283,21 @@ public:
     TRACE("getting rendering suff: " << GetKey(display_dev) << "\n");
     uint32_t gpuCount;
     list_all_gpus = true;
-    vkEnumeratePhysicalDevices(the_instance, &gpuCount, nullptr);
+    loader_dispatch.EnumeratePhysicalDevices(the_instance, &gpuCount, nullptr);
     TRACE("Gpus: " << gpuCount << "\n");
     std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
-    vkEnumeratePhysicalDevices(the_instance, &gpuCount, physicalDevices.data());
+    loader_dispatch.EnumeratePhysicalDevices(the_instance, &gpuCount, physicalDevices.data());
     list_all_gpus = false;
 
     display_dev = physicalDevices[1];
     TRACE("phys[1]: " << display_dev << "\n");
 
-    vkGetPhysicalDeviceMemoryProperties(display_dev, &display_mem);
-    vkGetPhysicalDeviceMemoryProperties(physicalDevices[0], &render_mem);
+    loader_dispatch.GetPhysicalDeviceMemoryProperties(display_dev, &display_mem);
+    loader_dispatch.GetPhysicalDeviceMemoryProperties(physicalDevices[0], &render_mem);
     
     std::vector<VkQueueFamilyProperties> queueFamilyProperties;
     if(true){
-      PFN_vkGetPhysicalDeviceQueueFamilyProperties getQueues = vkGetPhysicalDeviceQueueFamilyProperties;
+      PFN_vkGetPhysicalDeviceQueueFamilyProperties getQueues = loader_dispatch.GetPhysicalDeviceQueueFamilyProperties;
       uint32_t queueFamilyCount;
       getQueues(display_dev, &queueFamilyCount, nullptr);
       assert(queueFamilyCount > 0);
@@ -314,7 +326,7 @@ public:
     VkResult ret;
     
     TRACE("Creating Graphics: " << ret << ", "  << "\n");
-    ret = vkCreateDevice(display_dev, &createInfo, nullptr, &pDeviceLogic);
+    ret = loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &pDeviceLogic);
     TRACE("Create Graphics FINISHED!: " << ret << "\n");
     TRACE("Display: " << GetKey(pDeviceLogic) << ".\n");
     TRACE("storing as reference to: " << GetKey(render_gpu)  << "\n");
@@ -359,7 +371,7 @@ public:
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].AllocateCommandBuffers(device, &cmdBufAllocateInfo, &cmd));
   
     VkCommandBufferBeginInfo cmdBufInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    VK_CHECK_RESULT(device_dispatch[GetKey(cmd)].BeginCommandBuffer(cmd, &cmdBufInfo));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].BeginCommandBuffer(cmd, &cmdBufInfo));
   }
   ~CommandBuffer(){
     device_dispatch[GetKey(device)].FreeCommandBuffers(device, commandPool, 1, &cmd);
@@ -417,7 +429,7 @@ public:
     submitInfo.pCommandBuffers = &cmd;
 
     // Submit to the queue
-    VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, fence));
+    VK_CHECK_RESULT(device_dispatch[GetKey(queue)].QueueSubmit(queue, 1, &submitInfo, fence));
   }
 };
 class Fence{
@@ -515,11 +527,13 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   return VK_SUCCESS;
 
 }
+
 VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice){
   TRACE("fetching dispatch for " << GetKey(*pDevice) << "\n");
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerDispatchTable dispatchTable;
-#define FETCH(x) dispatchTable.x = (PFN_vk##x)gdpa(*pDevice, #x);
+#define FETCH(x) dispatchTable.x = (PFN_vk##x)gdpa(*pDevice, "vk" #x);
+#define _FETCH(x) dispatchTable.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
   FETCH(GetDeviceProcAddr);
   TRACE("GetDeviceProcAddr is: " << (void*) dispatchTable.GetDeviceProcAddr << "\n");
   FETCH(DestroyDevice);
@@ -546,7 +560,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(UnmapMemory);
 
 
-  FETCH(AllocateCommandBuffers);
+  _FETCH(AllocateCommandBuffers);
   FETCH(BeginCommandBuffer);
   FETCH(CmdCopyImage);
   FETCH(CmdPipelineBarrier);
@@ -557,9 +571,9 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(FreeCommandBuffers);
   //FETCH(GetPhysicalDeviceMemoryProperties);
   //FETCH(GetPhysicalDeviceQueueFamilyProperties);
-  FETCH(QueueSubmit);
+  _FETCH(QueueSubmit);
   
-  FETCH(GetDeviceQueue);
+  _FETCH(GetDeviceQueue);
 
   FETCH(CreateFence);
   FETCH(WaitForFences);
@@ -717,7 +731,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
   qsi.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   qsi.signalSemaphoreCount = 1;
   qsi.pSignalSemaphores = &semaphore;
-  vkQueueSubmit(ch->render_queue, 1, &qsi, nullptr);
+  device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, nullptr);
   TRACE_FRAME("out: " << res << "\n");
   return res;
 }
@@ -837,7 +851,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, cons
   qsi.pWaitDstStageMask = &flags;
   qsi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
   qsi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
-  vkQueueSubmit(queue, 1, &qsi, nullptr);
+  device_dispatch[GetKey(queue)].QueueSubmit(queue, 1, &qsi, nullptr);
 
   const auto index = pPresentInfo->pImageIndices[0];
   ch->copyImageData(index);
