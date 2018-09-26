@@ -29,7 +29,7 @@ typedef std::lock_guard<std::mutex> scoped_lock;
 
 // use the loader's dispatch table pointer as a key for dispatch map lookups
 template<typename DispatchableType>
-void *GetKey(DispatchableType inst)
+void *&GetKey(DispatchableType inst)
 {
   return *(void **)inst;
 }
@@ -42,8 +42,8 @@ struct InstanceInfo {
 std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
 std::map<void *, InstanceInfo> instance_info;
 std::map<void *, VkLayerDispatchTable> device_dispatch;
-std::map<void *, VkPhysicalDevice> render_to_display;
-std::map<void *, VkDevice> render_to_display_instance;
+std::map<VkPhysicalDevice, VkPhysicalDevice> render_to_display;
+std::map<VkDevice, VkDevice> render_to_display_instance;
 
 VkInstance the_instance;
 
@@ -51,6 +51,9 @@ VkInstance the_instance;
 #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x;
 // #define TRACE(x)
 #define TRACE_FRAME(x)
+//#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", 7, __LINE__);}}while(0);
+#define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Layer init and shutdown
@@ -61,6 +64,10 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     VkInstance*                                 pInstance)
 {
   TRACE("CreateInstance\n");
+  if(the_instance != nullptr){
+    TRACE("Error, only one instance allowed");
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
   VkLayerInstanceCreateInfo *layerCreateInfo = (VkLayerInstanceCreateInfo *)pCreateInfo->pNext;
 
   // step through the chain of pNext until we get to the link info
@@ -82,7 +89,8 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
 
   PFN_vkCreateInstance createFunc = (PFN_vkCreateInstance)gpa(VK_NULL_HANDLE, "vkCreateInstance");
 
-  VkResult ret = createFunc(pCreateInfo, pAllocator, pInstance);
+  VK_CHECK_RESULT( createFunc(pCreateInfo, pAllocator, pInstance) );
+  the_instance = *pInstance;
   
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerInstanceDispatchTable dispatchTable;
@@ -120,12 +128,17 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     TRACE("Device: " << props.deviceName << std::endl);
     TRACE("  Type: " << props.deviceType << std::endl);
   }
+  if(display == VK_NULL_HANDLE) {
+    TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?\n");
+  }
+  if(render == VK_NULL_HANDLE) {
+    TRACE("No device for the rendering GPU found. Is the correct driver installed?\n");
+  }
   if(display == VK_NULL_HANDLE || render == VK_NULL_HANDLE){
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  render_to_display[GetKey(render)] = display;
+  render_to_display[render] = display;
   TRACE(GetKey(render) << " --> " << GetKey(display) << "\n");
-  the_instance = *pInstance;
 
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
   FORWARD(GetPhysicalDeviceSurfaceFormatsKHR);
@@ -134,7 +147,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
   FORWARD(GetPhysicalDeviceSurfacePresentModesKHR);
 #undef FORWARD
-  
+
   // store the table by key
   {
     scoped_lock l(global_lock);
@@ -155,8 +168,6 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, co
 #include <memory>
 #include <thread>
 
-//#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", 7, __LINE__);}}while(0);
-#define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
 struct FramebufferImage;
 struct MappedMemory{
   VkDevice device;
@@ -436,6 +447,13 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
     VkDevice*                                   pDevice)
 {
   TRACE("in function: creating device\n");
+  {
+    auto info = pCreateInfo;
+    while(info != nullptr){
+      TRACE("Extension: " << info->sType << "\n");
+      info = (VkDeviceCreateInfo *) info->pNext;
+    }
+  }
   VkLayerDeviceCreateInfo *layerCreateInfo = (VkLayerDeviceCreateInfo *)pCreateInfo->pNext;
 
   // step through the chain of pNext until we get to the link info
@@ -454,6 +472,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   PFN_vkGetInstanceProcAddr gipa = layerCreateInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
   PFN_vkGetDeviceProcAddr gdpa = layerCreateInfo->u.pLayerInfo->pfnNextGetDeviceProcAddr;
   // move chain on for next layer
+  TRACE(layerCreateInfo->u.pLayerInfo);
   layerCreateInfo->u.pLayerInfo = layerCreateInfo->u.pLayerInfo->pNext;
 
   // store info for subsequent create call
@@ -461,21 +480,28 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   VkDevice pDeviceLogic = *pDevice;
 
   PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
-
-  VkDeviceCreateInfo ifo = *pCreateInfo;
+  TRACE(layerCreateInfo->u.pLayerInfo);
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
+  TRACE(layerCreateInfo->u.pLayerInfo);
   {
     scoped_lock l(global_lock);
     TRACE("spawning secondary device creation\n");
     static bool first = true;
     if(first){
+      first = false;
       // hopefully the first createFunc has only modified this one field
       layerCreateInfo->u.pLayerInfo = targetLayerInfo;
-      auto display_dev = render_to_display[GetKey(physicalDevice)];
+      TRACE("After reset:" << layerCreateInfo->u.pLayerInfo);
+      auto display_dev = render_to_display[physicalDevice];
+      // VkDeviceCreateInfo displayCreate{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+      //VkDevice display_dev = {};
+      // VK_CHECK_RESULT(dispatchTable.CreateDevice(display, &displayCreate, nullptr, &display_dev));
+  
+
+      
       cod = new CreateOtherDevice{display_dev, physicalDevice, *pDevice};
       cod->start();
       pthread_yield();
-      first = false;
     }
   }
 
@@ -801,7 +827,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateXcbSurfaceKHR(VkInstance inst
 
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormatsKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pSurfaceFormatCount, VkSurfaceFormatKHR* pSurfaceFormats) {
-  VkPhysicalDevice phy = render_to_display[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = render_to_display[physicalDevice];
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormatsKHR(phy, surface, pSurfaceFormatCount, pSurfaceFormats);
 }
 
@@ -811,12 +837,12 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities) {
-  VkPhysicalDevice phy = render_to_display[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = render_to_display[physicalDevice];
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceCapabilitiesKHR(phy, surface, pSurfaceCapabilities);
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, VkSurfaceKHR surface, VkBool32* pSupported) {
-  VkPhysicalDevice phy = render_to_display[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = render_to_display[physicalDevice];
   queueFamilyIndex = 0;
   auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, queueFamilyIndex, surface, pSupported);
   printf("Support: %xd, %d\n", GetKey(phy), *pSupported);
@@ -824,7 +850,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pPresentModeCount, VkPresentModeKHR* pPresentModes) {
-  VkPhysicalDevice phy = render_to_display[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = render_to_display[physicalDevice];
   auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfacePresentModesKHR(phy, surface, pPresentModeCount, pPresentModes);
   return res;
 }
