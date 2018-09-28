@@ -56,9 +56,10 @@ VkInstance the_instance;
 std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 
 
-#define TRACE(x) std::cout << "PrimusVK: " << x << "\n";
-#define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
 // #define TRACE(x)
+#define TRACE(x) std::cout << "PrimusVK: " << x << "\n";
+#define TRACE_PROFILING(x)
+// #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
 #define TRACE_FRAME(x)
 //#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", 7, __LINE__);}}while(0);
 #define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
@@ -196,6 +197,7 @@ struct FramebufferImage {
 
   std::shared_ptr<MappedMemory> mapped;
   FramebufferImage(VkDevice device, VkExtent2D size, VkImageTiling tiling, VkImageUsageFlags usage, int memoryTypeIndex): device(device){
+    TRACE("Creating image: " << size.width << "x" << size.height);
     VkImageCreateInfo imageCreateCI {};
     imageCreateCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageCreateCI.imageType = VK_IMAGE_TYPE_2D;
@@ -261,7 +263,7 @@ struct MySwapchain{
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
   void copyImageData(uint32_t idx);
-  std::shared_ptr<MappedMemory> storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat);
+  void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat);
 };
 
 bool list_all_gpus = false;
@@ -604,6 +606,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   VkSwapchainKHR old = pCreateInfo->oldSwapchain;
   if(old != VK_NULL_HANDLE){
     MySwapchain *ch = reinterpret_cast<MySwapchain*>(old);
+    // delete ch;
     info2.oldSwapchain = ch->backend;
     TRACE("Old Swapchain: " << ch->backend);
   }
@@ -697,6 +700,7 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, Vk
   TRACE(">> Destroy swapchain: " << (void*) ch->backend);
   // TODO: the Nvidia driver segfaults when passing a chain here?
   // device_dispatch[GetKey(device)].DestroySwapchainKHR(device, ch->backend, pAllocator);
+  delete ch;
 }
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages) {
   MySwapchain *ch = reinterpret_cast<MySwapchain*>(swapchain);
@@ -739,7 +743,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
 #include <fstream>
 #include <algorithm>
 
-std::shared_ptr<MappedMemory> MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat){
+void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat){
   auto cpyImage = render_copy_images[index];
   auto srcImage = render_images[index]->img;
     CommandBuffer cmd{device};
@@ -776,22 +780,38 @@ std::shared_ptr<MappedMemory> MySwapchain::storeImage(uint32_t index, VkDevice d
     cmd.submit(queue, f.fence);
     f.await();
      
-    VkSubresourceLayout subResourceLayout = cpyImage->getLayout();
-    // Map image memory so we can start copying from it
-    auto mapped = cpyImage->getMapped();
-    const char* data = mapped->data + subResourceLayout.offset;
-    return mapped;
 }
 #include <chrono>
 
 void MySwapchain::copyImageData(uint32_t index){
-  auto target = storeImage(index, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM);
+  storeImage(index, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM);
 
   {
-    auto mapped = display_src_images[index]->getMapped();
+    auto rendered = render_copy_images[index]->getMapped();
+    auto display = display_src_images[index]->getMapped();
+    auto rendered_layout = render_copy_images[index]->getLayout();
+    auto display_layout = display_src_images[index]->getLayout();
+    auto rendered_start = rendered->data + rendered_layout.offset;
+    auto display_start = display->data + display_layout.offset;
+    if(rendered_layout.size/rendered_layout.rowPitch != display_layout.size/display_layout.rowPitch){
+      TRACE("Layouts don't match at all");
+      throw std::runtime_error("Layouts don't match at all");
+    }
 
     auto start = std::chrono::steady_clock::now();
-    memcpy(mapped->data, target->data, 4*imgSize.width*imgSize.height);
+    if(rendered_layout.rowPitch == display_layout.rowPitch){
+      memcpy(display_start, rendered_start, rendered_layout.size);
+    }else{
+      VkDeviceSize display_offset = 0;
+      VkDeviceSize minRowPitch = rendered_layout.rowPitch;
+      if(display_layout.rowPitch < minRowPitch){
+	minRowPitch = display_layout.rowPitch;
+      }
+      for(VkDeviceSize offset = 0; offset < rendered_layout.size; offset += rendered_layout.rowPitch){
+	memcpy(display_start + display_offset, rendered_start + offset, minRowPitch);
+	display_offset += display_layout.rowPitch;
+      }
+    }
     TRACE_PROFILING("Time for plain memcpy: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
   }
 
