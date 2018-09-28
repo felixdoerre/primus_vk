@@ -56,8 +56,8 @@ VkInstance the_instance;
 std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 
 
-#define TRACE(x) std::cout << "PrimusVK: " << x;
-#define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x;
+#define TRACE(x) std::cout << "PrimusVK: " << x << "\n";
+#define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
 // #define TRACE(x)
 #define TRACE_FRAME(x)
 //#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", 7, __LINE__);}}while(0);
@@ -72,9 +72,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     const VkAllocationCallbacks*                pAllocator,
     VkInstance*                                 pInstance)
 {
-  TRACE("CreateInstance\n");
+  TRACE("CreateInstance");
   if(the_instance != nullptr){
-    TRACE("Error, only one instance allowed\n");
+    TRACE("Error, only one instance allowed");
     return VK_ERROR_INITIALIZATION_FAILED;
   }
   VkLayerInstanceCreateInfo *layerCreateInfo = (VkLayerInstanceCreateInfo *)pCreateInfo->pNext;
@@ -114,7 +114,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   std::vector<VkPhysicalDevice> physicalDevices;
   {
     auto enumerateDevices = dispatchTable.EnumeratePhysicalDevices;
-    TRACE("Getting devices" << std::endl);
+    TRACE("Getting devices");
     uint32_t gpuCount = 0;
     enumerateDevices(*pInstance, &gpuCount, nullptr);
     physicalDevices.resize(gpuCount);
@@ -128,26 +128,26 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     TRACE(GetKey(dev) << ": ");
     if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
       display = dev;
-      TRACE("got display!\n");
+      TRACE("got display!");
     }
     if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU){
-      TRACE("got render!\n");
+      TRACE("got render!");
       render = dev;
     }
-    TRACE("Device: " << props.deviceName << std::endl);
-    TRACE("  Type: " << props.deviceType << std::endl);
+    TRACE("Device: " << props.deviceName);
+    TRACE("  Type: " << props.deviceType);
   }
   if(display == VK_NULL_HANDLE) {
-    TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?\n");
+    TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?");
   }
   if(render == VK_NULL_HANDLE) {
-    TRACE("No device for the rendering GPU found. Is the correct driver installed?\n");
+    TRACE("No device for the rendering GPU found. Is the correct driver installed?");
   }
   if(display == VK_NULL_HANDLE || render == VK_NULL_HANDLE){
     return VK_ERROR_INITIALIZATION_FAILED;
   }
   render_to_display[render] = display;
-  TRACE(GetKey(render) << " --> " << GetKey(display) << "\n");
+  TRACE(GetKey(render) << " --> " << GetKey(display));
 
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
   FORWARD(GetPhysicalDeviceSurfaceFormatsKHR);
@@ -279,18 +279,18 @@ public:
   }
   void run(){
     VkDevice pDeviceLogic;
-    TRACE("Thread running\n");
-    TRACE("getting rendering suff: " << GetKey(display_dev) << "\n");
+    TRACE("Thread running");
+    TRACE("getting rendering suff: " << GetKey(display_dev));
     uint32_t gpuCount;
     list_all_gpus = true;
     loader_dispatch.EnumeratePhysicalDevices(the_instance, &gpuCount, nullptr);
-    TRACE("Gpus: " << gpuCount << "\n");
+    TRACE("Gpus: " << gpuCount);
     std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
     loader_dispatch.EnumeratePhysicalDevices(the_instance, &gpuCount, physicalDevices.data());
     list_all_gpus = false;
 
     display_dev = physicalDevices[1];
-    TRACE("phys[1]: " << display_dev << "\n");
+    TRACE("phys[1]: " << display_dev);
 
     loader_dispatch.GetPhysicalDeviceMemoryProperties(display_dev, &display_mem);
     loader_dispatch.GetPhysicalDeviceMemoryProperties(physicalDevices[0], &render_mem);
@@ -303,9 +303,9 @@ public:
       assert(queueFamilyCount > 0);
       queueFamilyProperties.resize(queueFamilyCount);
       getQueues(display_dev, &queueFamilyCount, queueFamilyProperties.data());
-      TRACE("render queues: " << queueFamilyCount << "\n");
+      TRACE("render queues: " << queueFamilyCount);
       for(auto &props : queueFamilyProperties){
-	TRACE(" flags: " << queueFamilyProperties[0].queueFlags << "\n");
+	TRACE(" flags: " << queueFamilyProperties[0].queueFlags);
       }
     }
     VkDeviceCreateInfo createInfo = {};
@@ -325,11 +325,11 @@ public:
     createInfo.ppEnabledExtensionNames = swap;
     VkResult ret;
     
-    TRACE("Creating Graphics: " << ret << ", "  << "\n");
+    TRACE("Creating Graphics: " << ret << ", ");
     ret = loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &pDeviceLogic);
-    TRACE("Create Graphics FINISHED!: " << ret << "\n");
-    TRACE("Display: " << GetKey(pDeviceLogic) << ".\n");
-    TRACE("storing as reference to: " << GetKey(render_gpu)  << "\n");
+    TRACE("Create Graphics FINISHED!: " << ret);
+    TRACE("Display: " << GetKey(pDeviceLogic));
+    TRACE("storing as reference to: " << GetKey(render_gpu));
     display_gpu = pDeviceLogic;
 
   }
@@ -342,10 +342,10 @@ public:
   }
   bool joined = false;
   void join(){
-    if(joined) { TRACE( "Refusing second join\n" ); return; }
+    if(joined) { TRACE( "Refusing second join" ); return; }
     int error;
     if(error = pthread_join(thread, nullptr)){
-      fprintf(stderr, "Error joining thread: %d\n", error);
+      fprintf(stderr, "Error joining thread: %d", error);
     }
     joined = true;
   }
@@ -458,11 +458,11 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
     const VkAllocationCallbacks*                pAllocator,
     VkDevice*                                   pDevice)
 {
-  TRACE("in function: creating device\n");
+  TRACE("in function: creating device");
   {
     auto info = pCreateInfo;
     while(info != nullptr){
-      TRACE("Extension: " << info->sType << "\n");
+      TRACE("Extension: " << info->sType);
       info = (VkDeviceCreateInfo *) info->pNext;
     }
   }
@@ -494,13 +494,13 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
   {
     scoped_lock l(global_lock);
-    TRACE("spawning secondary device creation\n");
+    TRACE("spawning secondary device creation");
     static bool first = true;
     if(first){
       first = false;
       // hopefully the first createFunc has only modified this one field
       layerCreateInfo->u.pLayerInfo = targetLayerInfo;
-      TRACE("After reset:" << layerCreateInfo->u.pLayerInfo << "\n");
+      TRACE("After reset:" << layerCreateInfo->u.pLayerInfo);
       auto display_dev = render_to_display[physicalDevice];
       // VkDeviceCreateInfo displayCreate{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
       //VkDevice display_dev = {};
@@ -519,20 +519,20 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
     scoped_lock l(global_lock);
     device_dispatch[GetKey(*pDevice)] = fetchDispatchTable(gdpa, pDevice);
   }
-  TRACE("CreateDevice done\n");
+  TRACE("CreateDevice done");
 
   return VK_SUCCESS;
 
 }
 
 VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice){
-  TRACE("fetching dispatch for " << GetKey(*pDevice) << "\n");
+  TRACE("fetching dispatch for " << GetKey(*pDevice));
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerDispatchTable dispatchTable;
 #define FETCH(x) dispatchTable.x = (PFN_vk##x)gdpa(*pDevice, "vk" #x);
 #define _FETCH(x) dispatchTable.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
   FETCH(GetDeviceProcAddr);
-  TRACE("GetDeviceProcAddr is: " << (void*) dispatchTable.GetDeviceProcAddr << "\n");
+  TRACE("GetDeviceProcAddr is: " << (void*) dispatchTable.GetDeviceProcAddr);
   FETCH(DestroyDevice);
   FETCH(BeginCommandBuffer);
   FETCH(CmdDraw);
@@ -540,7 +540,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(EndCommandBuffer);
 
   FETCH(CreateSwapchainKHR);
-  TRACE("Create Swapchain KHR is: " << (void*) dispatchTable.CreateSwapchainKHR << "\n");
+  TRACE("Create Swapchain KHR is: " << (void*) dispatchTable.CreateSwapchainKHR);
   FETCH(DestroySwapchainKHR);
   FETCH(GetSwapchainImagesKHR);
   FETCH(AcquireNextImageKHR);
@@ -592,10 +592,10 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
       std::cerr << "no thread to join\n";
       return VK_ERROR_INITIALIZATION_FAILED;
     }
-    TRACE("joining secondary device creation\n");
-    TRACE("When startup hangs here, you have probably hit the initialization deadlock\n");
+    TRACE("joining secondary device creation");
+    TRACE("When startup hangs here, you have probably hit the initialization deadlock");
     cod->join();
-    TRACE("joining succeeded. Luckily initialization deadlock did not occur.\n");
+    TRACE("joining succeeded. Luckily initialization deadlock did not occur.");
   }
   VkDevice render_gpu = device;
   VkSwapchainCreateInfoKHR info2 = *pCreateInfo;
@@ -605,17 +605,17 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   if(old != VK_NULL_HANDLE){
     MySwapchain *ch = reinterpret_cast<MySwapchain*>(old);
     info2.oldSwapchain = ch->backend;
-    TRACE("Old Swapchain: " << ch->backend << "\n");
+    TRACE("Old Swapchain: " << ch->backend);
   }
-  TRACE("Creating Swapchain for size: " << pCreateInfo->imageExtent.width << "x" << CreateInfo->imageExtent.height << "\n");
-  TRACE("MinImageCount: " << pCreateInfo->minImageCount << "\n");
-  TRACE("fetching device for: " << GetKey(render_gpu)  << "\n");
+  TRACE("Creating Swapchain for size: " << pCreateInfo->imageExtent.width << "x" << CreateInfo->imageExtent.height);
+  TRACE("MinImageCount: " << pCreateInfo->minImageCount);
+  TRACE("fetching device for: " << GetKey(render_gpu));
   VkDevice display_gpu = cod->display_gpu;
-  TRACE("found: " << GetKey(display_gpu) << "\n");
+  TRACE("found: " << GetKey(display_gpu));
   
-  TRACE("FamilyIndexCount: " <<  pCreateInfo->queueFamilyIndexCount << "\n");
-  TRACE("Dev: " << GetKey(display_gpu) << "\n";);
-  TRACE("Swapchainfunc: " << (void*) device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR << "\n");
+  TRACE("FamilyIndexCount: " <<  pCreateInfo->queueFamilyIndexCount);
+  TRACE("Dev: " << GetKey(display_gpu));
+  TRACE("Swapchainfunc: " << (void*) device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR);
 
   MySwapchain *ch = new MySwapchain();
   ch->display_device = display_gpu;
@@ -647,7 +647,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
       display_host_mem = j;
     }
   }
-  TRACE("Selected render mem: " << render_host_mem << ";" << render_local_mem << " display: " << display_host_mem << "\n");
+  TRACE("Selected render mem: " << render_host_mem << ";" << render_local_mem << " display: " << display_host_mem);
   size_t i = 0;
   for( auto &renderImage: ch->render_images){
     renderImage = std::make_shared<FramebufferImage>(render_gpu, pCreateInfo->imageExtent,
@@ -681,11 +681,11 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
 
 
   VkResult rc = device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR(display_gpu, pCreateInfo, pAllocator, &ch->backend);
-  TRACE(">> Swapchain create done " << rc << ";" << (void*) ch->backend << "\n");
+  TRACE(">> Swapchain create done " << rc << ";" << (void*) ch->backend);
 
   uint32_t count;
   device_dispatch[GetKey(ch->display_device)].GetSwapchainImagesKHR(ch->display_device, ch->backend, &count, nullptr);
-  TRACE("Image aquiring: " << count << "; created: " << i << "\n");
+  TRACE("Image aquiring: " << count << "; created: " << i);
   ch->display_images.resize(count);
   device_dispatch[GetKey(ch->display_device)].GetSwapchainImagesKHR(ch->display_device, ch->backend, &count, ch->display_images.data());
   return rc;
@@ -694,7 +694,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator) {
     if(swapchain == nullptr) { return;}
   MySwapchain *ch = reinterpret_cast<MySwapchain*>(swapchain);
-  TRACE(">> Destroy swapchain: " << (void*) ch->backend << "\n");
+  TRACE(">> Destroy swapchain: " << (void*) ch->backend);
   // TODO: the Nvidia driver segfaults when passing a chain here?
   // device_dispatch[GetKey(device)].DestroySwapchainKHR(device, ch->backend, pAllocator);
 }
@@ -704,17 +704,17 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice devi
   *pSwapchainImageCount = ch->render_images.size();
   VkResult res = VK_SUCCESS;
   if(pSwapchainImages != nullptr) {
-    TRACE("Get Swapchain Images buffer: " <<  pSwapchainImages << "\n");
+    TRACE("Get Swapchain Images buffer: " <<  pSwapchainImages);
     res = VK_SUCCESS; //device_dispatch[GetKey(device)].GetSwapchainImagesKHR(device, ch->backend, pSwapchainImageCount, pSwapchainImages);
     for(size_t i = 0; i < *pSwapchainImageCount; i++){
       pSwapchainImages[i] = ch->render_images[i]->img;
     }
-    TRACE("Count: " << *pSwapchainImageCount << "\n");
+    TRACE("Count: " << *pSwapchainImageCount);
   }
   return res;
 }
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
-  TRACE_FRAME("AcquireNextImage: sem: " << semaphore << ", fence: " << fence << "\n");
+  TRACE_FRAME("AcquireNextImage: sem: " << semaphore << ", fence: " << fence);
   MySwapchain *ch = reinterpret_cast<MySwapchain*>(swapchain);
 
   VkResult res;
@@ -722,7 +722,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
     Fence myfence{ch->display_device};
 
     res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, timeout, nullptr, myfence.fence, pImageIndex);
-    TRACE_FRAME("AcquireNextImageKHR: " << *pImageIndex << ";" << res << "\n");
+    TRACE_FRAME("AcquireNextImageKHR: " << *pImageIndex << ";" << res);
 
     myfence.await();
   }
@@ -731,7 +731,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
   qsi.signalSemaphoreCount = 1;
   qsi.pSignalSemaphores = &semaphore;
   device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, nullptr);
-  TRACE_FRAME("out: " << res << "\n");
+  TRACE_FRAME("out: " << res);
   return res;
 }
 #include <iostream>
@@ -792,7 +792,7 @@ void MySwapchain::copyImageData(uint32_t index){
 
     auto start = std::chrono::steady_clock::now();
     memcpy(mapped->data, target->data, 4*imgSize.width*imgSize.height);
-    TRACE_PROFILING("Time for plain memcpy: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds\n");
+    TRACE_PROFILING("Time for plain memcpy: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
   }
 
   if(display_commands[index] == nullptr){
@@ -855,16 +855,16 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, cons
   const auto index = pPresentInfo->pImageIndices[0];
   ch->copyImageData(index);
   
-  TRACE_FRAME("Swapchain QueuePresent: #semaphores: " << pPresentInfo->waitSemaphoreCount << ", #chains: " << pPresentInfo->swapchainCount << ", imageIndex: " << *pPresentInfo->pImageIndices << "\n");
-  TRACE_PROFILING("Own time for present: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds\n");
+  TRACE_FRAME("Swapchain QueuePresent: #semaphores: " << pPresentInfo->waitSemaphoreCount << ", #chains: " << pPresentInfo->swapchainCount << ", imageIndex: " << *pPresentInfo->pImageIndices);
+  TRACE_PROFILING("Own time for present: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
   VkResult res = device_dispatch[GetKey(ch->display_queue)].QueuePresentKHR(ch->display_queue, &p2);
   return res;
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateXcbSurfaceKHR(VkInstance instance, const VkXcbSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface) {
-  TRACE("Fetching function...\n");
+  TRACE("Fetching function...");
   PFN_vkCreateXcbSurfaceKHR fn = (PFN_vkCreateXcbSurfaceKHR)instance_dispatch[GetKey(instance)].GetInstanceProcAddr(instance, "vkCreateXcbSurfaceKHR");
-  TRACE("Xcb create surface: " << fn << "\n");
+  TRACE("Xcb create surface: " << fn);
   return fn(instance, pCreateInfo, pAllocator, pSurface);
 }
 
@@ -888,7 +888,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
   VkPhysicalDevice phy = render_to_display[physicalDevice];
   queueFamilyIndex = 0;
   auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, queueFamilyIndex, surface, pSupported);
-  TRACE("Support: " << GetKey(phy) << ", " << *pSupported << "\n");
+  TRACE("Support: " << GetKey(phy) << ", " << *pSupported);
   return res;
 }
 
