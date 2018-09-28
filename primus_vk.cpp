@@ -596,8 +596,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
       return VK_ERROR_INITIALIZATION_FAILED;
     }
     TRACE("joining secondary device creation\n");
+    TRACE("When startup hangs here, you have probably hit the initialization deadlock\n");
     cod->join();
-    TRACE("joining succeeded\n");
+    TRACE("joining succeeded. Luckily initialization deadlock did not occur.\n");
   }
   VkDevice render_gpu = device;
   VkSwapchainCreateInfoKHR info2 = *pCreateInfo;
@@ -614,9 +615,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   VkDevice display_gpu = cod->display_gpu;
   TRACE("found: " << GetKey(display_gpu) << "\n");
   
-  printf("FamilyIndexCount: %d\n", pCreateInfo->queueFamilyIndexCount);
+  TRACE("FamilyIndexCount: " <<  pCreateInfo->queueFamilyIndexCount << "\n");
   TRACE("Dev: " << GetKey(display_gpu) << "\n";);
-  TRACE("Swapchainfunc: " << (void*) device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR << "\n";);
+  TRACE("Swapchainfunc: " << (void*) device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR << "\n");
 
   MySwapchain *ch = new MySwapchain();
   ch->display_device = display_gpu;
@@ -705,12 +706,12 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice devi
   *pSwapchainImageCount = ch->render_images.size();
   VkResult res = VK_SUCCESS;
   if(pSwapchainImages != nullptr) {
-    printf("Get Swapchain Images buffer: %d\n", pSwapchainImages);
+    TRACE("Get Swapchain Images buffer: " <<  pSwapchainImages << "\n");
     res = VK_SUCCESS; //device_dispatch[GetKey(device)].GetSwapchainImagesKHR(device, ch->backend, pSwapchainImageCount, pSwapchainImages);
     for(size_t i = 0; i < *pSwapchainImageCount; i++){
       pSwapchainImages[i] = ch->render_images[i]->img;
     }
-    printf("Count: %d\n", *pSwapchainImageCount);
+    TRACE("Count: " << *pSwapchainImageCount << "\n");
   }
   return res;
 }
@@ -863,9 +864,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, cons
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateXcbSurfaceKHR(VkInstance instance, const VkXcbSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface) {
-  printf("Fetching function...\n");
+  TRACE("Fetching function...\n");
   PFN_vkCreateXcbSurfaceKHR fn = (PFN_vkCreateXcbSurfaceKHR)instance_dispatch[GetKey(instance)].GetInstanceProcAddr(instance, "vkCreateXcbSurfaceKHR");
-  printf("Xcb create surface: %d\n", fn);
+  TRACE("Xcb create surface: " << fn << "\n");
   return fn(instance, pCreateInfo, pAllocator, pSurface);
 }
 
@@ -889,7 +890,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
   VkPhysicalDevice phy = render_to_display[physicalDevice];
   queueFamilyIndex = 0;
   auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, queueFamilyIndex, surface, pSupported);
-  printf("Support: %xd, %d\n", GetKey(phy), *pSupported);
+  TRACE("Support: " << GetKey(phy) << ", " << *pSupported << "\n");
   return res;
 }
 
