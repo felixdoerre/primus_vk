@@ -607,7 +607,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
     info2.oldSwapchain = ch->backend;
     TRACE("Old Swapchain: " << ch->backend);
   }
-  TRACE("Creating Swapchain for size: " << pCreateInfo->imageExtent.width << "x" << CreateInfo->imageExtent.height);
+  TRACE("Creating Swapchain for size: " << pCreateInfo->imageExtent.width << "x" << pCreateInfo->imageExtent.height);
   TRACE("MinImageCount: " << pCreateInfo->minImageCount);
   TRACE("fetching device for: " << GetKey(render_gpu));
   VkDevice display_gpu = cod->display_gpu;
