@@ -74,7 +74,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
 {
   TRACE("CreateInstance\n");
   if(the_instance != nullptr){
-    TRACE("Error, only one instance allowed");
+    TRACE("Error, only one instance allowed\n");
     return VK_ERROR_INITIALIZATION_FAILED;
   }
   VkLayerInstanceCreateInfo *layerCreateInfo = (VkLayerInstanceCreateInfo *)pCreateInfo->pNext;
@@ -342,7 +342,7 @@ public:
   }
   bool joined = false;
   void join(){
-    if(joined) { TRACE( "Refusing second join" ); return; }
+    if(joined) { TRACE( "Refusing second join\n" ); return; }
     int error;
     if(error = pthread_join(thread, nullptr)){
       fprintf(stderr, "Error joining thread: %d\n", error);
@@ -484,7 +484,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   PFN_vkGetInstanceProcAddr gipa = layerCreateInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
   PFN_vkGetDeviceProcAddr gdpa = layerCreateInfo->u.pLayerInfo->pfnNextGetDeviceProcAddr;
   // move chain on for next layer
-  TRACE(layerCreateInfo->u.pLayerInfo);
   layerCreateInfo->u.pLayerInfo = layerCreateInfo->u.pLayerInfo->pNext;
 
   // store info for subsequent create call
@@ -492,9 +491,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   VkDevice pDeviceLogic = *pDevice;
 
   PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
-  TRACE(layerCreateInfo->u.pLayerInfo);
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
-  TRACE(layerCreateInfo->u.pLayerInfo);
   {
     scoped_lock l(global_lock);
     TRACE("spawning secondary device creation\n");
@@ -503,7 +500,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
       first = false;
       // hopefully the first createFunc has only modified this one field
       layerCreateInfo->u.pLayerInfo = targetLayerInfo;
-      TRACE("After reset:" << layerCreateInfo->u.pLayerInfo);
+      TRACE("After reset:" << layerCreateInfo->u.pLayerInfo << "\n");
       auto display_dev = render_to_display[physicalDevice];
       // VkDeviceCreateInfo displayCreate{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
       //VkDevice display_dev = {};
@@ -610,6 +607,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
     info2.oldSwapchain = ch->backend;
     TRACE("Old Swapchain: " << ch->backend << "\n");
   }
+  TRACE("Creating Swapchain for size: " << pCreateInfo->imageExtent.width << "x" << CreateInfo->imageExtent.height << "\n");
   TRACE("MinImageCount: " << pCreateInfo->minImageCount << "\n");
   TRACE("fetching device for: " << GetKey(render_gpu)  << "\n");
   VkDevice display_gpu = cod->display_gpu;
