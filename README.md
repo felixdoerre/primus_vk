@@ -35,7 +35,7 @@ However this layer should already be usable with most applications.
 	2. Wine loads OpenGL, which should be satisfied by OpenGL-Primus. However for whatever reason wine directly gets Nvidia's libGL which fails to provide an OpenGL context for the primary X screen.
 	This needs to be prevented by forcing wine to load Primus' libGL.
 
-Issues 2. and 3. can be worked around by compiling `libnv_vulkan_wrapper.so` and registering it instead of nvidia's `libGL.so.1` in `/usr/share/vulkan/icd.d/nvidia_icd.json`.
+Issues 2.,3. and 4. can be worked around by compiling `libnv_vulkan_wrapper.so` and registering it instead of nvidia's `libGL.so.1` in `/usr/share/vulkan/icd.d/nvidia_icd.json`.
 
 ## Installation
 ### Locally
