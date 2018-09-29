@@ -32,8 +32,7 @@ However this layer should already be usable with most applications.
 
 4. When running an applications with DXVK and wine, wine loads both Vulkan and OpenGL. This creates a problem as:
 	1. Wine loads Vulkan, which loades the integrated GPU's ICD, the Nvidia ICD (contained in Nvidia's libGL.so on my system), Primus-VK and potentially more.
-	2. Wine loads Vulkan without using ld.so's RTLD_GLOBAL. This prevents Primus-VK from accessing libvulkan's Vulkan-API functions which are currently still required to create the `VkDevice` for the rendering GPU. This is currently required due to problem 1., because we still want to call the Vulkan Loader directly.
-	3. Wine loads OpenGL, which should be satisfied by OpenGL-Primus. However for whatever reason wine directly gets Nvidia's libGL which fails to provide an OpenGL context for the primary X screen.
+	2. Wine loads OpenGL, which should be satisfied by OpenGL-Primus. However for whatever reason wine directly gets Nvidia's libGL which fails to provide an OpenGL context for the primary X screen.
 	This needs to be prevented by forcing wine to load Primus' libGL.
 
 Issues 2. and 3. can be worked around by compiling `libnv_vulkan_wrapper.so` and registering it instead of nvidia's `libGL.so.1` in `/usr/share/vulkan/icd.d/nvidia_icd.json`.
