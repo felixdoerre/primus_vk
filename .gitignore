@@ -3,3 +3,5 @@
 
 /libprimus_vk.so
 /libnv_vulkan_wrapper.so
+/primus-vk-diag
+/primus_vk_diag.o
