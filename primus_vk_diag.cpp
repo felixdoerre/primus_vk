@@ -84,7 +84,7 @@ VulkanContext::VulkanContext(){
   }
 }
 VulkanContext::~VulkanContext(){
-  std::cout << "Destroying Vulkan" << std::endl;
+  std::cout << self << "Destroying Vulkan" << std::endl;
   vkDestroyInstance(instance, nullptr);
 }
 
@@ -199,7 +199,7 @@ int main (int argc, char ** argv) {
   for(int i = 1; i < argc; i++){
     std::string arg = argv[i];
     if(arg == "gl"){
-      std::cout << "Loading GL." << std::endl;
+      std::cout << self << "Loading GL." << std::endl;
       auto winContext = std::make_unique<XWindowContext>(display);
       GLContext context = GLContext{*winContext};
       context.drawSample();
