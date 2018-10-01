@@ -178,7 +178,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAllocator)
 {
   scoped_lock l(global_lock);
+  the_instance = nullptr;
   instance_dispatch.erase(GetKey(instance));
+  // TODO call DestroyInstance down the chain?
 }
 
 struct FramebufferImage;
