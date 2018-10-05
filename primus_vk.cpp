@@ -276,7 +276,7 @@ struct MySwapchain{
   }
 
   void copyImageData(uint32_t idx);
-  void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat);
+  void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> semaphores);
 
   void queue(VkQueue queue, const VkPresentInfoKHR *pPresentInfo);
 
@@ -448,12 +448,12 @@ public:
   void end(){
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].EndCommandBuffer(cmd));
   }
-  void submit(VkQueue queue, VkFence fence){
+  void submit(VkQueue queue, VkFence fence, std::vector<VkSemaphore> semaphores){
     VkSubmitInfo submitInfo = {.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmd;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;
+    submitInfo.waitSemaphoreCount = semaphores.size();
+    submitInfo.pWaitSemaphores = semaphores.data();
 
     // Submit to the queue
     VK_CHECK_RESULT(device_dispatch[GetKey(queue)].QueueSubmit(queue, 1, &submitInfo, fence));
@@ -703,7 +703,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
 			   VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
     cmd.end();
     Fence f{ch->display_device};
-    cmd.submit(ch->display_queue, f.fence);
+    cmd.submit(ch->display_queue, f.fence, {});
     f.await();
   }
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
@@ -769,7 +769,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
 #include <fstream>
 #include <algorithm>
 
-void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat){
+void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> semaphores){
   auto cpyImage = render_copy_images[index];
   auto srcImage = render_images[index]->img;
     CommandBuffer cmd{device};
@@ -803,14 +803,13 @@ void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize
 
     cmd.end();
     Fence f{device};
-    cmd.submit(queue, f.fence);
+    cmd.submit(queue, f.fence, semaphores);
     f.await();
 
 }
 #include <chrono>
 
 void MySwapchain::copyImageData(uint32_t index){
-  storeImage(index, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM);
   {
     std::unique_lock<std::mutex> lock(queueMutex);
     has_work.notify_all();
@@ -880,7 +879,7 @@ void MySwapchain::copyImageData(uint32_t index){
   }
 
   Fence f{display_device};
-  display_commands[index]->submit(display_queue, f.fence);
+  display_commands[index]->submit(display_queue, f.fence, {});
   f.await();
 
 }
@@ -888,20 +887,11 @@ void MySwapchain::copyImageData(uint32_t index){
 void MySwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
   std::unique_lock<std::mutex> lock(queueMutex);
 
-  VkSubmitInfo qsi{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  VkPipelineStageFlags flags = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-  qsi.pWaitDstStageMask = &flags;
-  qsi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
-  qsi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
-  Fence f{device};
-  device_dispatch[GetKey(queue)].QueueSubmit(queue, 1, &qsi, f.fence);
-  f.await();
-
   auto workItem = QueueItem{queue, *pPresentInfo, pPresentInfo->pImageIndices[0]};
+  storeImage(workItem.imgIndex, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM, std::vector<VkSemaphore>{pPresentInfo->pWaitSemaphores, pPresentInfo->pWaitSemaphores + pPresentInfo->waitSemaphoreCount});
 
   work.push_back(workItem);
   has_work.notify_all();
-  has_work.wait(lock, [this](){return work.size() == 0;});
 }
 void MySwapchain::stop(){
   {
