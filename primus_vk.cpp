@@ -253,6 +253,7 @@ MappedMemory::~MappedMemory(){
   device_dispatch[GetKey(device)].UnmapMemory(device, mem);
 }
 class CommandBuffer;
+class Fence;
 struct MySwapchain{
   std::chrono::steady_clock::time_point lastPresent = std::chrono::steady_clock::now();
   VkDevice device;
@@ -276,7 +277,7 @@ struct MySwapchain{
   }
 
   void copyImageData(uint32_t idx);
-  void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> semaphores);
+  void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify);
 
   void queue(VkQueue queue, const VkPresentInfoKHR *pPresentInfo);
 
@@ -769,10 +770,10 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
 #include <fstream>
 #include <algorithm>
 
-void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> semaphores){
+void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify){
   auto cpyImage = render_copy_images[index];
   auto srcImage = render_images[index]->img;
-    CommandBuffer cmd{device};
+  CommandBuffer cmd{device};
     cmd.insertImageMemoryBarrier(
 	cpyImage->img,
 	0,					VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -802,10 +803,7 @@ void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize
 	VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
     cmd.end();
-    Fence f{device};
-    cmd.submit(queue, f.fence, semaphores);
-    f.await();
-
+    cmd.submit(queue, notify.fence, wait_on);
 }
 #include <chrono>
 
@@ -888,7 +886,9 @@ void MySwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
   std::unique_lock<std::mutex> lock(queueMutex);
 
   auto workItem = QueueItem{queue, *pPresentInfo, pPresentInfo->pImageIndices[0]};
-  storeImage(workItem.imgIndex, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM, std::vector<VkSemaphore>{pPresentInfo->pWaitSemaphores, pPresentInfo->pWaitSemaphores + pPresentInfo->waitSemaphoreCount});
+  auto f = Fence{device};
+  storeImage(workItem.imgIndex, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM, std::vector<VkSemaphore>{pPresentInfo->pWaitSemaphores, pPresentInfo->pWaitSemaphores + pPresentInfo->waitSemaphoreCount}, f);
+  f.await();
 
   work.push_back(workItem);
   has_work.notify_all();
