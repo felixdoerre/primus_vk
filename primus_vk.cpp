@@ -61,8 +61,9 @@ std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 #define TRACE_PROFILING(x)
 // #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
 #define TRACE_FRAME(x)
-//#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", 7, __LINE__);}}while(0);
-#define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
+// #define TRACE_FRAME(x) std::cout << "PrimusVK: " << x << "\n";
+#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", r, __LINE__);}}while(0);
+// #define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////
