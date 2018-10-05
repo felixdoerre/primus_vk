@@ -253,7 +253,25 @@ MappedMemory::~MappedMemory(){
   device_dispatch[GetKey(device)].UnmapMemory(device, mem);
 }
 class CommandBuffer;
-class Fence;
+class Fence{
+  VkDevice device;
+public:
+  VkFence fence;
+  Fence(VkDevice dev): device(dev){
+    // Create fence to ensure that the command buffer has finished executing
+    VkFenceCreateInfo fenceInfo = {.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags=0};
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateFence(device, &fenceInfo, nullptr, &fence));
+  }
+  void await(){
+    const auto start = std::chrono::steady_clock::now();
+    // Wait for the fence to signal that command buffer has finished executing
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].WaitForFences(device, 1, &fence, VK_TRUE, 10000000000L));
+    TRACE_PROFILING("Time for fence: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
+  }
+  ~Fence(){
+    device_dispatch[GetKey(device)].DestroyFence(device, fence, nullptr);
+  }
+};
 struct MySwapchain{
   std::chrono::steady_clock::time_point lastPresent = std::chrono::steady_clock::now();
   VkDevice device;
@@ -288,6 +306,7 @@ struct MySwapchain{
     VkQueue queue;
     VkPresentInfoKHR pPresentInfo;
     uint32_t imgIndex;
+    std::unique_ptr<Fence> fence;
   };
   std::list<QueueItem> work;
   void present(const QueueItem &workItem);
@@ -458,25 +477,6 @@ public:
 
     // Submit to the queue
     VK_CHECK_RESULT(device_dispatch[GetKey(queue)].QueueSubmit(queue, 1, &submitInfo, fence));
-  }
-};
-class Fence{
-  VkDevice device;
-public:
-  VkFence fence;
-  Fence(VkDevice dev): device(dev){
-    // Create fence to ensure that the command buffer has finished executing
-    VkFenceCreateInfo fenceInfo = {.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags=0};
-    VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateFence(device, &fenceInfo, nullptr, &fence));
-  }
-  void await(){
-    const auto start = std::chrono::steady_clock::now();
-    // Wait for the fence to signal that command buffer has finished executing
-    VK_CHECK_RESULT(device_dispatch[GetKey(device)].WaitForFences(device, 1, &fence, VK_TRUE, 10000000000L));
-    TRACE_PROFILING("Time for fence: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
-  }
-  ~Fence(){
-    device_dispatch[GetKey(device)].DestroyFence(device, fence, nullptr);
   }
 };
 
@@ -885,12 +885,10 @@ void MySwapchain::copyImageData(uint32_t index){
 void MySwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
   std::unique_lock<std::mutex> lock(queueMutex);
 
-  auto workItem = QueueItem{queue, *pPresentInfo, pPresentInfo->pImageIndices[0]};
-  auto f = Fence{device};
-  storeImage(workItem.imgIndex, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM, std::vector<VkSemaphore>{pPresentInfo->pWaitSemaphores, pPresentInfo->pWaitSemaphores + pPresentInfo->waitSemaphoreCount}, f);
-  f.await();
+  auto workItem = QueueItem{queue, *pPresentInfo, pPresentInfo->pImageIndices[0], std::unique_ptr<Fence>{new Fence{device}}};
+  storeImage(workItem.imgIndex, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM, std::vector<VkSemaphore>{pPresentInfo->pWaitSemaphores, pPresentInfo->pWaitSemaphores + pPresentInfo->waitSemaphoreCount}, *workItem.fence);
 
-  work.push_back(workItem);
+  work.push_back(std::move(workItem));
   has_work.notify_all();
 }
 void MySwapchain::stop(){
@@ -931,7 +929,7 @@ void MySwapchain::run(){
       std::unique_lock<std::mutex> lock(queueMutex);
       has_work.wait(lock, [this](){return !active || work.size() > 0;});
       if(!active) return;
-      workItem = work.front();
+      workItem = std::move(work.front());
       work.pop_front();
     }
     present(workItem);
