@@ -50,9 +50,10 @@ struct InstanceInfo {
 
 std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
 VkLayerInstanceDispatchTable loader_dispatch;
+// VkInstance->disp is beeing malloc'ed for every new instance
+// so we can assume it to be a good key.
 std::map<void *, InstanceInfo> instance_info;
 std::map<void *, VkLayerDispatchTable> device_dispatch;
-std::map<VkPhysicalDevice, VkPhysicalDevice> render_to_display;
 
 std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 
@@ -162,9 +163,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   // store the table by key
   {
     scoped_lock l(global_lock);
-
-    render_to_display[render] = display;
-    TRACE(GetKey(render) << " --> " << GetKey(display));
 
     instance_dispatch[GetKey(*pInstance)] = dispatchTable;
     instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display};
@@ -528,7 +526,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
       // hopefully the first createFunc has only modified this one field
       layerCreateInfo->u.pLayerInfo = targetLayerInfo;
       TRACE("After reset:" << layerCreateInfo->u.pLayerInfo);
-      auto display_dev = render_to_display[physicalDevice];
+      auto display_dev = instance_info[GetKey(physicalDevice)].display;
       // VkDeviceCreateInfo displayCreate{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
       //VkDevice display_dev = {};
       // VK_CHECK_RESULT(dispatchTable.CreateDevice(display, &displayCreate, nullptr, &display_dev));
@@ -935,6 +933,9 @@ void MySwapchain::run(){
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
   const auto start = std::chrono::steady_clock::now();
+  if(pPresentInfo->swapchainCount != 1){
+    TRACE("Warning, presenting with multiple swapchains not implemented, ignoring");
+  }
 
   MySwapchain *ch = reinterpret_cast<MySwapchain*>(pPresentInfo->pSwapchains[0]);
   double secs = std::chrono::duration_cast<std::chrono::duration<double>>(start - ch->lastPresent).count();
@@ -955,7 +956,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateXcbSurfaceKHR(VkInstance inst
 
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormatsKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pSurfaceFormatCount, VkSurfaceFormatKHR* pSurfaceFormats) {
-  VkPhysicalDevice phy = render_to_display[physicalDevice];
+  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormatsKHR(phy, surface, pSurfaceFormatCount, pSurfaceFormats);
 }
 
@@ -965,12 +966,12 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities) {
-  VkPhysicalDevice phy = render_to_display[physicalDevice];
+  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceCapabilitiesKHR(phy, surface, pSurfaceCapabilities);
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, VkSurfaceKHR surface, VkBool32* pSupported) {
-  VkPhysicalDevice phy = render_to_display[physicalDevice];
+  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   queueFamilyIndex = 0;
   auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, queueFamilyIndex, surface, pSupported);
   TRACE("Support: " << GetKey(phy) << ", " << *pSupported);
@@ -978,7 +979,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pPresentModeCount, VkPresentModeKHR* pPresentModes) {
-  VkPhysicalDevice phy = render_to_display[physicalDevice];
+  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfacePresentModesKHR(phy, surface, pPresentModeCount, pPresentModes);
   return res;
 }
