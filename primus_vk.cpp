@@ -43,6 +43,7 @@ void *&GetKey(DispatchableType inst)
 }
 
 struct InstanceInfo {
+  VkInstance instance;
   VkPhysicalDevice render;
   VkPhysicalDevice display;
 };
@@ -52,9 +53,7 @@ VkLayerInstanceDispatchTable loader_dispatch;
 std::map<void *, InstanceInfo> instance_info;
 std::map<void *, VkLayerDispatchTable> device_dispatch;
 std::map<VkPhysicalDevice, VkPhysicalDevice> render_to_display;
-std::map<VkDevice, VkDevice> render_to_display_instance;
 
-VkInstance the_instance;
 std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 
 
@@ -77,10 +76,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     VkInstance*                                 pInstance)
 {
   TRACE("CreateInstance");
-  if(the_instance != nullptr){
-    TRACE("Error, only one instance allowed");
-    return VK_ERROR_INITIALIZATION_FAILED;
-  }
   VkLayerInstanceCreateInfo *layerCreateInfo = (VkLayerInstanceCreateInfo *)pCreateInfo->pNext;
 
   // step through the chain of pNext until we get to the link info
@@ -103,7 +98,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   PFN_vkCreateInstance createFunc = (PFN_vkCreateInstance)gpa(VK_NULL_HANDLE, "vkCreateInstance");
 
   VK_CHECK_RESULT( createFunc(pCreateInfo, pAllocator, pInstance) );
-  the_instance = *pInstance;
 
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerInstanceDispatchTable dispatchTable;
@@ -150,9 +144,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   if(display == VK_NULL_HANDLE || render == VK_NULL_HANDLE){
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  render_to_display[render] = display;
-  TRACE(GetKey(render) << " --> " << GetKey(display));
-
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
   FORWARD(GetPhysicalDeviceSurfaceFormatsKHR);
   FORWARD(GetPhysicalDeviceQueueFamilyProperties);
@@ -171,8 +162,12 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   // store the table by key
   {
     scoped_lock l(global_lock);
-    instance_dispatch[GetKey(the_instance)] = dispatchTable;
-    instance_info[GetKey(*pInstance)] = InstanceInfo{.render = render, .display=display};
+
+    render_to_display[render] = display;
+    TRACE(GetKey(render) << " --> " << GetKey(display));
+
+    instance_dispatch[GetKey(*pInstance)] = dispatchTable;
+    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display};
   }
 
   return VK_SUCCESS;
@@ -181,8 +176,8 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAllocator)
 {
   scoped_lock l(global_lock);
-  the_instance = nullptr;
   instance_dispatch.erase(GetKey(instance));
+  instance_info.erase(GetKey(instance));
   // TODO call DestroyInstance down the chain?
 }
 
@@ -330,15 +325,17 @@ public:
     display_dev(display_dev), render_dev(render_dev), render_gpu(render_gpu){
   }
   void run(){
+    auto &minstance_info = instance_info[GetKey(render_dev)];
+    
     VkDevice pDeviceLogic;
     TRACE("Thread running");
     TRACE("getting rendering suff: " << GetKey(display_dev));
     uint32_t gpuCount;
     list_all_gpus = true;
-    loader_dispatch.EnumeratePhysicalDevices(the_instance, &gpuCount, nullptr);
+    loader_dispatch.EnumeratePhysicalDevices(minstance_info.instance, &gpuCount, nullptr);
     TRACE("Gpus: " << gpuCount);
     std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
-    loader_dispatch.EnumeratePhysicalDevices(the_instance, &gpuCount, physicalDevices.data());
+    loader_dispatch.EnumeratePhysicalDevices(minstance_info.instance, &gpuCount, physicalDevices.data());
     list_all_gpus = false;
 
     display_dev = physicalDevices[1];
