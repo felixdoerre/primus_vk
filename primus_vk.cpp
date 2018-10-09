@@ -293,7 +293,19 @@ struct MySwapchain{
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
   std::unique_ptr<std::thread> myThread;
-  MySwapchain(){
+  MySwapchain(VkDevice device, VkDevice display_device, const VkSwapchainCreateInfoKHR *pCreateInfo):
+    device(device), display_device(display_device){
+    uint32_t image_count = pCreateInfo->minImageCount;
+    // TODO automatically find correct queue and not choose 0 forcibly
+    device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
+    device_dispatch[GetKey(display_device)].GetDeviceQueue(display_device, 0, 0, &display_queue);
+    render_images.resize(image_count);
+    render_copy_images.resize(image_count);
+    display_src_images.resize(image_count);
+    display_commands.resize(image_count);
+    imgSize = pCreateInfo->imageExtent;
+    sem = std::move(std::unique_ptr<Semaphore>(new Semaphore(display_device)));
+
     TRACE("Creating a Swapchain thread.")
     myThread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
     pthread_setname_np(myThread->native_handle(), "swapchain-thread");
@@ -660,18 +672,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   TRACE("Dev: " << GetKey(display_gpu));
   TRACE("Swapchainfunc: " << (void*) device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR);
 
-  MySwapchain *ch = new MySwapchain();
-  ch->display_device = display_gpu;
-  // TODO automatically find correct queue and not choose 0 forcibly
-  device_dispatch[GetKey(render_gpu)].GetDeviceQueue(render_gpu, 0, 0, &ch->render_queue);
-  device_dispatch[GetKey(display_gpu)].GetDeviceQueue(display_gpu, 0, 0, &ch->display_queue);
-  ch->device = render_gpu;
-  ch->render_images.resize(pCreateInfo->minImageCount);
-  ch->render_copy_images.resize(pCreateInfo->minImageCount);
-  ch->display_src_images.resize(pCreateInfo->minImageCount);
-  ch->display_commands.resize(pCreateInfo->minImageCount);
-  ch->imgSize = pCreateInfo->imageExtent;
-  ch->sem = std::move(std::unique_ptr<Semaphore>(new Semaphore(display_gpu)));
+  MySwapchain *ch = new MySwapchain(render_gpu, display_gpu, pCreateInfo);
 
   VkMemoryPropertyFlags host_mem = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
   VkMemoryPropertyFlags local_mem = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
