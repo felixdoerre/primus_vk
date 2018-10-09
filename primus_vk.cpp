@@ -906,11 +906,12 @@ void MySwapchain::present(const QueueItem &workItem){
     TRACE_FRAME("Swapchain QueuePresent: #semaphores: " << pPresentInfo->waitSemaphoreCount << ", #chains: " << pPresentInfo->swapchainCount << ", imageIndex: " << index);
     TRACE_PROFILING("Own time for present: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
 
-    VkPresentInfoKHR p2 = *pPresentInfo;
+    VkPresentInfoKHR p2 = {.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     p2.pSwapchains = &backend;
     p2.swapchainCount = 1;
     p2.pWaitSemaphores = nullptr;
     p2.waitSemaphoreCount = 0;
+    p2.pImageIndices = &index;
 
     VkResult res = device_dispatch[GetKey(display_queue)].QueuePresentKHR(display_queue, &p2);
     if(res != VK_SUCCESS) {
