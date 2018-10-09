@@ -278,7 +278,7 @@ public:
     device_dispatch[GetKey(device)].DestroySemaphore(device, sem, nullptr);
   }
 };
-struct MySwapchain{
+struct PrimusSwapchain{
   std::chrono::steady_clock::time_point lastPresent = std::chrono::steady_clock::now();
   VkDevice device;
   VkQueue render_queue;
@@ -294,8 +294,8 @@ struct MySwapchain{
   std::vector<std::shared_ptr<CommandBuffer>> render_copy_commands;
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
-  std::unique_ptr<std::thread> myThread;
-  MySwapchain(VkDevice device, VkDevice display_device, const VkSwapchainCreateInfoKHR *pCreateInfo):
+  std::unique_ptr<std::thread> thread;
+  PrimusSwapchain(VkDevice device, VkDevice display_device, const VkSwapchainCreateInfoKHR *pCreateInfo):
     device(device), display_device(display_device){
     uint32_t image_count = pCreateInfo->minImageCount;
     // TODO automatically find correct queue and not choose 0 forcibly
@@ -307,15 +307,13 @@ struct MySwapchain{
     display_commands.resize(image_count);
     render_copy_commands.resize(image_count);
     imgSize = pCreateInfo->imageExtent;
-    sem = std::move(std::unique_ptr<Semaphore>(new Semaphore(display_device)));
 
     TRACE("Creating a Swapchain thread.")
-    myThread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
-    pthread_setname_np(myThread->native_handle(), "swapchain-thread");
+    thread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
+    pthread_setname_np(thread->native_handle(), "swapchain-thread");
   }
 
 
-  std::unique_ptr<Semaphore> sem;
   void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
   void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify);
 
@@ -347,13 +345,13 @@ public:
   VkDevice render_gpu;
   VkDevice display_gpu;
 
-  std::unique_ptr<std::thread> myThread;
+  std::unique_ptr<std::thread> thread;
   CreateOtherDevice(VkPhysicalDevice display_dev, VkPhysicalDevice render_dev, VkDevice render_gpu):
     display_dev(display_dev), render_dev(render_dev), render_gpu(render_gpu){
   }
   void run(){
     auto &minstance_info = instance_info[GetKey(render_dev)];
-    
+
     VkDevice pDeviceLogic;
     TRACE("Thread running");
     TRACE("getting rendering suff: " << GetKey(display_dev));
@@ -408,12 +406,12 @@ public:
   }
 
   void start(){
-    myThread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
+    thread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
   }
   void join(){
-    if(myThread == nullptr) { TRACE( "Refusing second join" ); return; }
-    myThread->join();
-    myThread.reset();
+    if(thread == nullptr) { TRACE( "Refusing second join" ); return; }
+    thread->join();
+    thread.reset();
   }
 };
 void* threadmain(void *d){
@@ -657,7 +655,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   pCreateInfo = &info2;
   VkSwapchainKHR old = pCreateInfo->oldSwapchain;
   if(old != VK_NULL_HANDLE){
-    MySwapchain *ch = reinterpret_cast<MySwapchain*>(old);
+    PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(old);
     info2.oldSwapchain = ch->backend;
     TRACE("Old Swapchain: " << ch->backend);
   }
@@ -671,7 +669,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   TRACE("Dev: " << GetKey(display_gpu));
   TRACE("Swapchainfunc: " << (void*) device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR);
 
-  MySwapchain *ch = new MySwapchain(render_gpu, display_gpu, pCreateInfo);
+  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, pCreateInfo);
 
   VkMemoryPropertyFlags host_mem = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
   VkMemoryPropertyFlags local_mem = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -737,7 +735,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
 
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator) {
     if(swapchain == nullptr) { return;}
-  MySwapchain *ch = reinterpret_cast<MySwapchain*>(swapchain);
+  PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
   TRACE(">> Destroy swapchain: " << (void*) ch->backend);
   // TODO: the Nvidia driver segfaults when passing a chain here?
   // device_dispatch[GetKey(device)].DestroySwapchainKHR(device, ch->backend, pAllocator);
@@ -745,7 +743,7 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, Vk
   delete ch;
 }
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages) {
-  MySwapchain *ch = reinterpret_cast<MySwapchain*>(swapchain);
+  PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
 
   *pSwapchainImageCount = ch->render_images.size();
   VkResult res = VK_SUCCESS;
@@ -761,7 +759,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice devi
 }
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
   TRACE_FRAME("AcquireNextImage: sem: " << semaphore << ", fence: " << fence);
-  MySwapchain *ch = reinterpret_cast<MySwapchain*>(swapchain);
+  PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
 
   VkResult res;
   {
@@ -784,7 +782,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
 #include <fstream>
 #include <algorithm>
 
-void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify){
+void PrimusSwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify){
   auto cpyImage = render_copy_images[index];
   auto srcImage = render_images[index]->img;
   if(render_copy_commands[index] == nullptr){
@@ -825,7 +823,7 @@ void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize
 }
 #include <chrono>
 
-void MySwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
+void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
   {
     std::unique_lock<std::mutex> lock(queueMutex);
     has_work.notify_all();
@@ -897,7 +895,7 @@ void MySwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
   display_commands[index]->submit(display_queue, nullptr, sems);
 }
 
-void MySwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
+void PrimusSwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
   std::unique_lock<std::mutex> lock(queueMutex);
 
   auto workItem = QueueItem{queue, *pPresentInfo, pPresentInfo->pImageIndices[0], std::unique_ptr<Fence>{new Fence{device}}};
@@ -906,16 +904,17 @@ void MySwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
   work.push_back(std::move(workItem));
   has_work.notify_all();
 }
-void MySwapchain::stop(){
+void PrimusSwapchain::stop(){
   {
     std::unique_lock<std::mutex> lock(queueMutex);
     active = false;
     has_work.notify_all();
   }
-  myThread->join();
-  myThread.reset();
+  thread->join();
+  thread.reset();
 }
-void MySwapchain::present(const QueueItem &workItem){
+void PrimusSwapchain::present(const QueueItem &workItem){
+    std::unique_ptr<Semaphore> sem(new Semaphore(display_device));
     const auto index = workItem.imgIndex;
 
     const auto start = std::chrono::steady_clock::now();
@@ -936,7 +935,7 @@ void MySwapchain::present(const QueueItem &workItem){
       TRACE("ERROR, Queue Present failed\n");
     }
 }
-void MySwapchain::run(){
+void PrimusSwapchain::run(){
   while(true){
     QueueItem workItem{};
     {
@@ -956,7 +955,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, cons
     TRACE("Warning, presenting with multiple swapchains not implemented, ignoring");
   }
 
-  MySwapchain *ch = reinterpret_cast<MySwapchain*>(pPresentInfo->pSwapchains[0]);
+  PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(pPresentInfo->pSwapchains[0]);
   double secs = std::chrono::duration_cast<std::chrono::duration<double>>(start - ch->lastPresent).count();
   TRACE_PROFILING("Time between VkQueuePresents: " << secs << " -> " << 1/secs << " FPS");
   ch->lastPresent = start;
