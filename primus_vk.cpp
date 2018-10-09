@@ -295,8 +295,8 @@ struct PrimusSwapchain{
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
   std::unique_ptr<std::thread> thread;
-  PrimusSwapchain(VkDevice device, VkDevice display_device, const VkSwapchainCreateInfoKHR *pCreateInfo):
-    device(device), display_device(display_device){
+  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo):
+    device(device), display_device(display_device), backend(backend){
     uint32_t image_count = pCreateInfo->minImageCount;
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
@@ -307,6 +307,16 @@ struct PrimusSwapchain{
     display_commands.resize(image_count);
     render_copy_commands.resize(image_count);
     imgSize = pCreateInfo->imageExtent;
+
+    uint32_t count;
+    device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &count, nullptr);
+    TRACE("Image aquiring: " << count);
+    display_images.resize(count);
+    device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &count, display_images.data());
+
+
+
+    initImages();
 
     TRACE("Creating a Swapchain thread.")
     thread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
@@ -671,20 +681,18 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   TRACE("Dev: " << GetKey(display_gpu));
   TRACE("Swapchainfunc: " << (void*) device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR);
 
-  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, pCreateInfo);
+  VkSwapchainKHR backend;
+  VkResult rc = device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR(display_gpu, pCreateInfo, pAllocator, &backend);
+  TRACE(">> Swapchain create done " << rc << ";" << (void*) backend);
+  if(rc != VK_SUCCESS){
+    return rc;
+  }
 
-  ch->initImages();
+  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo);
+
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
 
-  VkResult rc = device_dispatch[GetKey(display_gpu)].CreateSwapchainKHR(display_gpu, pCreateInfo, pAllocator, &ch->backend);
-  TRACE(">> Swapchain create done " << rc << ";" << (void*) ch->backend);
-
-  uint32_t count;
-  device_dispatch[GetKey(ch->display_device)].GetSwapchainImagesKHR(ch->display_device, ch->backend, &count, nullptr);
-  TRACE("Image aquiring: " << count);
-  ch->display_images.resize(count);
-  device_dispatch[GetKey(ch->display_device)].GetSwapchainImagesKHR(ch->display_device, ch->backend, &count, ch->display_images.data());
   return rc;
 }
 
