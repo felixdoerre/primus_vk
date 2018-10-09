@@ -265,6 +265,18 @@ public:
     device_dispatch[GetKey(device)].DestroyFence(device, fence, nullptr);
   }
 };
+class Semaphore{
+  VkDevice device;
+public:
+  VkSemaphore sem;
+  Semaphore(VkDevice dev): device(dev){
+    VkSemaphoreCreateInfo semInfo = {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .flags=0};
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateSemaphore(device, &semInfo, nullptr, &sem));
+  }
+  ~Semaphore(){
+    device_dispatch[GetKey(device)].DestroySemaphore(device, sem, nullptr);
+  }
+};
 struct MySwapchain{
   std::chrono::steady_clock::time_point lastPresent = std::chrono::steady_clock::now();
   VkDevice device;
@@ -287,7 +299,9 @@ struct MySwapchain{
     pthread_setname_np(myThread->native_handle(), "swapchain-thread");
   }
 
-  void copyImageData(uint32_t idx);
+
+  std::unique_ptr<Semaphore> sem;
+  void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
   void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify);
 
   void queue(VkQueue queue, const VkPresentInfoKHR *pPresentInfo);
@@ -600,6 +614,10 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(CreateFence);
   FETCH(WaitForFences);
   FETCH(DestroyFence);
+
+  FETCH(CreateSemaphore);
+  FETCH(DestroySemaphore);
+
 #undef FETCH
   return dispatchTable;
 }
@@ -653,6 +671,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   ch->display_src_images.resize(pCreateInfo->minImageCount);
   ch->display_commands.resize(pCreateInfo->minImageCount);
   ch->imgSize = pCreateInfo->imageExtent;
+  ch->sem = std::move(std::unique_ptr<Semaphore>(new Semaphore(display_gpu)));
 
   VkMemoryPropertyFlags host_mem = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
   VkMemoryPropertyFlags local_mem = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -802,7 +821,7 @@ void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize
 }
 #include <chrono>
 
-void MySwapchain::copyImageData(uint32_t index){
+void MySwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
   {
     std::unique_lock<std::mutex> lock(queueMutex);
     has_work.notify_all();
@@ -871,10 +890,7 @@ void MySwapchain::copyImageData(uint32_t index){
 
   }
 
-  Fence f{display_device};
-  display_commands[index]->submit(display_queue, f.fence, {});
-  f.await();
-
+  display_commands[index]->submit(display_queue, nullptr, sems);
 }
 
 void MySwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
@@ -901,7 +917,7 @@ void MySwapchain::present(const QueueItem &workItem){
     const auto index = workItem.imgIndex;
 
     const auto start = std::chrono::steady_clock::now();
-    copyImageData(index);
+    copyImageData(index, {sem->sem});
 
     TRACE_FRAME("Swapchain QueuePresent: #semaphores: " << pPresentInfo->waitSemaphoreCount << ", #chains: " << pPresentInfo->swapchainCount << ", imageIndex: " << index);
     TRACE_PROFILING("Own time for present: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
@@ -909,8 +925,8 @@ void MySwapchain::present(const QueueItem &workItem){
     VkPresentInfoKHR p2 = {.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     p2.pSwapchains = &backend;
     p2.swapchainCount = 1;
-    p2.pWaitSemaphores = nullptr;
-    p2.waitSemaphoreCount = 0;
+    p2.pWaitSemaphores = &sem->sem;
+    p2.waitSemaphoreCount = 1;
     p2.pImageIndices = &index;
 
     VkResult res = device_dispatch[GetKey(display_queue)].QueuePresentKHR(display_queue, &p2);
