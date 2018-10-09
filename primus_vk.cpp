@@ -378,7 +378,7 @@ public:
       getQueues(display_dev, &queueFamilyCount, queueFamilyProperties.data());
       TRACE("render queues: " << queueFamilyCount);
       for(auto &props : queueFamilyProperties){
-	TRACE(" flags: " << queueFamilyProperties[0].queueFlags);
+	TRACE(" flags: " << props.queueFlags);
       }
     }
     VkDeviceCreateInfo createInfo = {};
@@ -396,10 +396,7 @@ public:
     createInfo.enabledExtensionCount = 1;
     const char *swap[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     createInfo.ppEnabledExtensionNames = swap;
-    VkResult ret;
-
-    TRACE("Creating Graphics: " << ret << ", ");
-    ret = loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &pDeviceLogic);
+    VkResult ret = loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &pDeviceLogic);
     TRACE("Create Graphics FINISHED!: " << ret);
     TRACE("Display: " << GetKey(pDeviceLogic));
     TRACE("storing as reference to: " << GetKey(render_gpu));
@@ -539,7 +536,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
 
   // store info for subsequent create call
   const auto targetLayerInfo = layerCreateInfo->u.pLayerInfo;
-  VkDevice pDeviceLogic = *pDevice;
 
   PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
@@ -572,7 +568,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   }
   TRACE("CreateDevice done");
 
-  return VK_SUCCESS;
+  return ret;
 
 }
 
@@ -913,8 +909,6 @@ void MySwapchain::stop(){
   myThread.reset();
 }
 void MySwapchain::present(const QueueItem &workItem){
-    auto &queue = workItem.queue;
-    const auto pPresentInfo = &workItem.pPresentInfo;
     const auto index = workItem.imgIndex;
 
     const auto start = std::chrono::steady_clock::now();
