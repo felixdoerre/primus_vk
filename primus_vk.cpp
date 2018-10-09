@@ -294,7 +294,7 @@ struct PrimusSwapchain{
   std::vector<std::shared_ptr<CommandBuffer>> render_copy_commands;
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
-  std::unique_ptr<std::thread> thread;
+  std::vector<std::unique_ptr<std::thread>> threads;
   PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo):
     device(device), display_device(display_device), backend(backend){
     uint32_t image_count = pCreateInfo->minImageCount;
@@ -317,9 +317,12 @@ struct PrimusSwapchain{
     initImages();
     createCommandBuffers();
 
-    TRACE("Creating a Swapchain thread.")
-    thread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
-    pthread_setname_np(thread->native_handle(), "swapchain-thread");
+    TRACE("Creating a Swapchain thread.");
+    threads.resize(1);
+    for(auto &thread: threads){
+      thread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
+      pthread_setname_np(thread->native_handle(), "swapchain-thread");
+    }
   }
 
   void initImages();
@@ -926,8 +929,10 @@ void PrimusSwapchain::stop(){
     active = false;
     has_work.notify_all();
   }
-  thread->join();
-  thread.reset();
+  for(auto &thread: threads){
+    thread->join();
+    thread.reset();
+  }
 }
 void PrimusSwapchain::present(const QueueItem &workItem){
     std::unique_ptr<Semaphore> sem(new Semaphore(display_device));
