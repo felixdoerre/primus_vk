@@ -291,6 +291,7 @@ struct MySwapchain{
   std::vector<VkImage> display_images;
   VkExtent2D imgSize;
 
+  std::vector<std::shared_ptr<CommandBuffer>> render_copy_commands;
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
   std::unique_ptr<std::thread> myThread;
@@ -304,6 +305,7 @@ struct MySwapchain{
     render_copy_images.resize(image_count);
     display_src_images.resize(image_count);
     display_commands.resize(image_count);
+    render_copy_commands.resize(image_count);
     imgSize = pCreateInfo->imageExtent;
     sem = std::move(std::unique_ptr<Semaphore>(new Semaphore(display_device)));
 
@@ -785,7 +787,10 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
 void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify){
   auto cpyImage = render_copy_images[index];
   auto srcImage = render_images[index]->img;
-  CommandBuffer cmd{device};
+  if(render_copy_commands[index] == nullptr){
+    render_copy_commands[index] = std::make_shared<CommandBuffer>(device);
+    CommandBuffer &cmd = *render_copy_commands[index];
+
     cmd.insertImageMemoryBarrier(
 	cpyImage->img,
 	0,					VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -815,7 +820,8 @@ void MySwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize
 	VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
     cmd.end();
-    cmd.submit(queue, notify.fence, wait_on);
+  }
+  render_copy_commands[index]->submit(queue, notify.fence, wait_on);
 }
 #include <chrono>
 
