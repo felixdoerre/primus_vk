@@ -235,6 +235,7 @@ struct FramebufferImage {
     return subResourceLayout;
   }
   ~FramebufferImage(){
+    mapped.reset();
     device_dispatch[GetKey(device)].FreeMemory(device, mem, nullptr);
     device_dispatch[GetKey(device)].DestroyImage(device, img, nullptr);
   }
