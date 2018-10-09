@@ -313,6 +313,8 @@ struct PrimusSwapchain{
     pthread_setname_np(thread->native_handle(), "swapchain-thread");
   }
 
+  void initImages();
+
 
   void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
   void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify);
@@ -671,54 +673,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
 
   PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, pCreateInfo);
 
-  VkMemoryPropertyFlags host_mem = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-  VkMemoryPropertyFlags local_mem = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-  ssize_t render_host_mem = -1;
-  ssize_t render_local_mem = -1;
-  ssize_t display_host_mem = -1;
-  for(size_t j=0; j < cod->render_mem.memoryTypeCount; j++){
-    if ( render_host_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & host_mem ) == host_mem ) {
-      render_host_mem = j;
-    }
-    if ( render_local_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & local_mem ) == local_mem ) {
-      render_local_mem = j;
-    }
-  }
-  for(size_t j=0; j < cod->display_mem.memoryTypeCount; j++){
-    if ( display_host_mem == -1 && ( cod->display_mem.memoryTypes[j].propertyFlags & host_mem ) == host_mem ) {
-      display_host_mem = j;
-    }
-  }
-  TRACE("Selected render mem: " << render_host_mem << ";" << render_local_mem << " display: " << display_host_mem);
-  size_t i = 0;
-  for( auto &renderImage: ch->render_images){
-    renderImage = std::make_shared<FramebufferImage>(render_gpu, pCreateInfo->imageExtent,
-        VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT, render_local_mem);
-    auto &renderCopyImage = ch->render_copy_images[i];
-    renderCopyImage = std::make_shared<FramebufferImage>(render_gpu, pCreateInfo->imageExtent,
-	VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_DST_BIT, render_host_mem);
-    auto &displaySrcImage = ch->display_src_images[i++];
-    displaySrcImage = std::make_shared<FramebufferImage>(display_gpu, pCreateInfo->imageExtent,
-	VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT, display_host_mem);
-
-    renderCopyImage->map();
-    displaySrcImage->map();
-
-    CommandBuffer cmd{ch->display_device};
-    cmd.insertImageMemoryBarrier(
-			   displaySrcImage->img,
-			   0,
-			   VK_ACCESS_MEMORY_WRITE_BIT,
-			   VK_IMAGE_LAYOUT_UNDEFINED,
-			   VK_IMAGE_LAYOUT_GENERAL,
-			   VK_PIPELINE_STAGE_TRANSFER_BIT,
-			   VK_PIPELINE_STAGE_TRANSFER_BIT,
-			   VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
-    cmd.end();
-    Fence f{ch->display_device};
-    cmd.submit(ch->display_queue, f.fence, {});
-    f.await();
-  }
+  ch->initImages();
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
 
@@ -727,7 +682,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
 
   uint32_t count;
   device_dispatch[GetKey(ch->display_device)].GetSwapchainImagesKHR(ch->display_device, ch->backend, &count, nullptr);
-  TRACE("Image aquiring: " << count << "; created: " << i);
+  TRACE("Image aquiring: " << count);
   ch->display_images.resize(count);
   device_dispatch[GetKey(ch->display_device)].GetSwapchainImagesKHR(ch->display_device, ch->backend, &count, ch->display_images.data());
   return rc;
@@ -781,6 +736,58 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
 #include <string>
 #include <fstream>
 #include <algorithm>
+
+void PrimusSwapchain::initImages(){
+
+  VkMemoryPropertyFlags host_mem = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags local_mem = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+  ssize_t render_host_mem = -1;
+  ssize_t render_local_mem = -1;
+  ssize_t display_host_mem = -1;
+  for(size_t j=0; j < cod->render_mem.memoryTypeCount; j++){
+    if ( render_host_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & host_mem ) == host_mem ) {
+      render_host_mem = j;
+    }
+    if ( render_local_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & local_mem ) == local_mem ) {
+      render_local_mem = j;
+    }
+  }
+  for(size_t j=0; j < cod->display_mem.memoryTypeCount; j++){
+    if ( display_host_mem == -1 && ( cod->display_mem.memoryTypes[j].propertyFlags & host_mem ) == host_mem ) {
+      display_host_mem = j;
+    }
+  }
+  TRACE("Selected render mem: " << render_host_mem << ";" << render_local_mem << " display: " << display_host_mem);
+  size_t i = 0;
+  for( auto &renderImage: render_images){
+    renderImage = std::make_shared<FramebufferImage>(device, imgSize,
+        VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT, render_local_mem);
+    auto &renderCopyImage = render_copy_images[i];
+    renderCopyImage = std::make_shared<FramebufferImage>(device, imgSize,
+	VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_DST_BIT, render_host_mem);
+    auto &displaySrcImage = display_src_images[i++];
+    displaySrcImage = std::make_shared<FramebufferImage>(display_device, imgSize,
+	VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT, display_host_mem);
+
+    renderCopyImage->map();
+    displaySrcImage->map();
+
+    CommandBuffer cmd{display_device};
+    cmd.insertImageMemoryBarrier(
+			   displaySrcImage->img,
+			   0,
+			   VK_ACCESS_MEMORY_WRITE_BIT,
+			   VK_IMAGE_LAYOUT_UNDEFINED,
+			   VK_IMAGE_LAYOUT_GENERAL,
+			   VK_PIPELINE_STAGE_TRANSFER_BIT,
+			   VK_PIPELINE_STAGE_TRANSFER_BIT,
+			   VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+    cmd.end();
+    Fence f{display_device};
+    cmd.submit(display_queue, f.fence, {});
+    f.await();
+  }
+}
 
 void PrimusSwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify){
   auto cpyImage = render_copy_images[index];
