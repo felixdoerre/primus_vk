@@ -944,12 +944,13 @@ void PrimusSwapchain::stop(){
 }
 void PrimusSwapchain::present(const QueueItem &workItem){
     std::unique_ptr<Semaphore> sem(new Semaphore(display_device));
+    workItem.fence->await();
     const auto index = workItem.imgIndex;
 
     const auto start = std::chrono::steady_clock::now();
     copyImageData(index, {sem->sem});
 
-    TRACE_FRAME("Swapchain QueuePresent: #semaphores: " << pPresentInfo->waitSemaphoreCount << ", #chains: " << pPresentInfo->swapchainCount << ", imageIndex: " << index);
+    TRACE_FRAME("Swapchain QueuePresent: imageIndex: " << index);
     TRACE_PROFILING("Own time for present: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
 
     VkPresentInfoKHR p2 = {.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
