@@ -283,6 +283,7 @@ struct PrimusSwapchain{
   VkDevice device;
   VkQueue render_queue;
   VkDevice display_device;
+  std::mutex displayQueueMutex;
   VkQueue display_queue;
   VkSwapchainKHR backend;
   std::vector<std::shared_ptr<FramebufferImage>> render_images;
@@ -297,10 +298,16 @@ struct PrimusSwapchain{
   std::vector<std::unique_ptr<std::thread>> threads;
   PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo):
     device(device), display_device(display_device), backend(backend){
-    uint32_t image_count = pCreateInfo->minImageCount;
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
     device_dispatch[GetKey(display_device)].GetDeviceQueue(display_device, 0, 0, &display_queue);
+
+    uint32_t image_count;
+    device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &image_count, nullptr);
+    TRACE("Image aquiring: " << image_count);
+    display_images.resize(image_count);
+    device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &image_count, display_images.data());
+
     render_images.resize(image_count);
     render_copy_images.resize(image_count);
     display_src_images.resize(image_count);
@@ -308,17 +315,16 @@ struct PrimusSwapchain{
     render_copy_commands.resize(image_count);
     imgSize = pCreateInfo->imageExtent;
 
-    uint32_t count;
-    device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &count, nullptr);
-    TRACE("Image aquiring: " << count);
-    display_images.resize(count);
-    device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &count, display_images.data());
-
     initImages();
     createCommandBuffers();
 
     TRACE("Creating a Swapchain thread.");
-    threads.resize(1);
+    size_t thread_count = 1;
+    char *m_env = getenv("PRIMUS_VK_MULTITHREADING");
+    if(m_env != nullptr && std::string{m_env} == "1"){
+      thread_count = 3;
+    }
+    threads.resize(thread_count);
     for(auto &thread: threads){
       thread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
       pthread_setname_np(thread->native_handle(), "swapchain-thread");
@@ -910,8 +916,10 @@ void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sem
     }
     TRACE_PROFILING("Time for plain memcpy: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
   }
-
-  display_commands[index]->submit(display_queue, nullptr, sems);
+  {
+    std::unique_lock<std::mutex> lock(queueMutex);
+    display_commands[index]->submit(display_queue, nullptr, sems);
+  }
 }
 
 void PrimusSwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo){
@@ -951,9 +959,12 @@ void PrimusSwapchain::present(const QueueItem &workItem){
     p2.waitSemaphoreCount = 1;
     p2.pImageIndices = &index;
 
-    VkResult res = device_dispatch[GetKey(display_queue)].QueuePresentKHR(display_queue, &p2);
-    if(res != VK_SUCCESS) {
-      TRACE("ERROR, Queue Present failed\n");
+    {
+      std::unique_lock<std::mutex> lock(queueMutex);
+      VkResult res = device_dispatch[GetKey(display_queue)].QueuePresentKHR(display_queue, &p2);
+      if(res != VK_SUCCESS) {
+	TRACE("ERROR, Queue Present failed\n");
+      }
     }
 }
 void PrimusSwapchain::run(){
