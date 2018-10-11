@@ -50,6 +50,7 @@ Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the pat
 2. Patch path in `/usr/share/vulkan/icd.d/nvidia_icd.json` to point to the compiled `libnv_vulkan_wrapper.so`.
 3. Install `primus_vk.json` and adjust path.
 4. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
+5. If you want to have more than 30 FPS and don't care if `primus_vk` uses more CPU resources, set `PRIMUS_VK_MULTITHREADING=1`
 
 I tested this on Debian unstable.
 
@@ -69,8 +70,14 @@ For testing a Windows DX11-Application, I used:
 wine32-development:i386                                     3.14-1
 wine64-development                                          3.14-1
 ```
-and dxvk-0.7 inside the wineprefix. Wine was locally patched to load `libGL.so` and `libvulkan.so` correctly.
+and dxvk-0.7 inside the wineprefix.
 
+### Arch Linux
+
+Notes for running on Arch Linux:
+
+* nv_vulkan_wrapper.cpp: Change nvDiver path to `/usr/lib/libGLX_nvidia.so.0`
+* primus_vk.cpp: add: `#include "vk_layer_utils.h"` (on Debian the contents are included in some other header and there is no "vk_layer_utils.h")
 
 ## Credits
 
