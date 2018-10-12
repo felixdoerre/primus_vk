@@ -358,7 +358,6 @@ struct PrimusSwapchain{
 };
 
 bool list_all_gpus = false;
-void* threadmain(void *d);
 class CreateOtherDevice {
 public:
   VkPhysicalDevice display_dev;
@@ -437,12 +436,6 @@ public:
     thread.reset();
   }
 };
-void* threadmain(void *d){
-  auto *p = reinterpret_cast<CreateOtherDevice*>(d);
-  p->run();
-  return nullptr;
-}
-
 
 
 class CommandBuffer {
