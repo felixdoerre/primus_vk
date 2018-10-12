@@ -62,8 +62,11 @@ std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 #define TRACE(x) std::cout << "PrimusVK: " << x << "\n";
 #define TRACE_PROFILING(x)
 // #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
+#define TRACE_PROFILING_EVENT(x, y)
+// #define TRACE_PROFILING_EVENT(idx, evt) std::cout << "PrimusVK-profiling: " << idx << " " << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - primus_start).count() << " " << evt << "\n";
 #define TRACE_FRAME(x)
 // #define TRACE_FRAME(x) std::cout << "PrimusVK: " << x << "\n";
+
 #define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", r, __LINE__);}}while(0);
 // #define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
 
@@ -260,7 +263,6 @@ public:
     const auto start = std::chrono::steady_clock::now();
     // Wait for the fence to signal that command buffer has finished executing
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].WaitForFences(device, 1, &fence, VK_TRUE, 10000000000L));
-    TRACE_PROFILING("Time for fence: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
   }
   ~Fence(){
     device_dispatch[GetKey(device)].DestroyFence(device, fence, nullptr);
@@ -729,8 +731,14 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice devi
   }
   return res;
 }
+
+const auto primus_start = std::chrono::steady_clock::now();
+
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
-  TRACE_FRAME("AcquireNextImage: sem: " << semaphore << ", fence: " << fence);
+  if(fence != VK_NULL_HANDLE){
+    TRACE("Error, fence in acquireNextImage not implemented");
+  }
+  TRACE_PROFILING_EVENT(-1, "Acquire starting");
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
 
   VkResult res;
@@ -738,7 +746,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
     Fence myfence{ch->display_device};
 
     res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, timeout, nullptr, myfence.fence, pImageIndex);
-    TRACE_FRAME("AcquireNextImageKHR: " << *pImageIndex << ";" << res);
+    TRACE_PROFILING_EVENT(*pImageIndex, "got image");
 
     myfence.await();
   }
@@ -747,6 +755,8 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
   qsi.signalSemaphoreCount = 1;
   qsi.pSignalSemaphores = &semaphore;
   device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, nullptr);
+  TRACE_PROFILING_EVENT(*pImageIndex, "Acquire done");
+
   return res;
 }
 #include <iostream>
@@ -899,7 +909,7 @@ void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sem
       TRACE("Layouts don't match at all");
       throw std::runtime_error("Layouts don't match at all");
     }
-
+    TRACE_PROFILING_EVENT(index, "memcpy start");
     auto start = std::chrono::steady_clock::now();
     if(rendered_layout.rowPitch == display_layout.rowPitch){
       memcpy(display_start, rendered_start, rendered_layout.size);
@@ -914,7 +924,7 @@ void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sem
 	display_offset += display_layout.rowPitch;
       }
     }
-    TRACE_PROFILING("Time for plain memcpy: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
+    TRACE_PROFILING_EVENT(index, "memcpy done");
   }
   {
     std::unique_lock<std::mutex> lock(queueMutex);
@@ -950,8 +960,7 @@ void PrimusSwapchain::present(const QueueItem &workItem){
     const auto start = std::chrono::steady_clock::now();
     copyImageData(index, {sem->sem});
 
-    TRACE_FRAME("Swapchain QueuePresent: imageIndex: " << index);
-    TRACE_PROFILING("Own time for present: " << std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start).count() << " seconds");
+    TRACE_PROFILING_EVENT(index, "copy queued");
 
     VkPresentInfoKHR p2 = {.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     p2.pSwapchains = &backend;
@@ -962,6 +971,7 @@ void PrimusSwapchain::present(const QueueItem &workItem){
 
     {
       std::unique_lock<std::mutex> lock(queueMutex);
+      TRACE_PROFILING_EVENT(index, "submitting");
       VkResult res = device_dispatch[GetKey(display_queue)].QueuePresentKHR(display_queue, &p2);
       if(res != VK_SUCCESS) {
 	TRACE("ERROR, Queue Present failed\n");
@@ -990,7 +1000,8 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, cons
 
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(pPresentInfo->pSwapchains[0]);
   double secs = std::chrono::duration_cast<std::chrono::duration<double>>(start - ch->lastPresent).count();
-  TRACE_PROFILING("Time between VkQueuePresents: " << secs << " -> " << 1/secs << " FPS");
+  TRACE_PROFILING_EVENT(pPresentInfo->pImageIndices[0], "QueuePresent");
+  TRACE_PROFILING(" === Time between VkQueuePresents: " << secs << " -> " << 1/secs << " FPS");
   ch->lastPresent = start;
 
   ch->queue(queue, pPresentInfo);
