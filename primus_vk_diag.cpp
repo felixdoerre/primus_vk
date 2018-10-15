@@ -21,6 +21,7 @@ class VulkanContext {
   VkInstance instance;
 public:
   VulkanContext();
+  VulkanContext(const VulkanContext&) = delete;
   ~VulkanContext();
 };
 #define VK_CHECK()     if(reply != VK_SUCCESS){ \
@@ -84,7 +85,7 @@ VulkanContext::VulkanContext(){
   }
 }
 VulkanContext::~VulkanContext(){
-  std::cout << self << "Destroying Vulkan" << std::endl;
+  std::cout << self << "Destroying Vulkan: " << instance << std::endl;
   vkDestroyInstance(instance, nullptr);
 }
 
@@ -200,7 +201,7 @@ int main (int argc, char ** argv) {
     std::string arg = argv[i];
     if(arg == "gl"){
       std::cout << self << "Loading GL." << std::endl;
-      auto winContext = std::make_unique<XWindowContext>(display);
+      auto winContext = std::make_shared<XWindowContext>(display);
       GLContext context = GLContext{*winContext};
       context.drawSample();
     } else if(arg == "vulkan") {
