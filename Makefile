@@ -1,4 +1,6 @@
-CXXFLAGS=-std=c++11 -g3
+CXXFLAGS += -std=gnu++11 -g3
+
+all: libprimus_vk.so libnv_vulkan_wrapper.so
 
 libprimus_vk.so: primus_vk.cpp
 	g++ $(CXXFLAGS) -I/usr/include/vulkan -shared -fPIC $^ -o $@
