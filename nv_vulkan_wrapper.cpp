@@ -27,6 +27,7 @@ public:
     glLibGL = dlopen("libGL.so.1", RTLD_GLOBAL | RTLD_NOW);
 
     nvDriver = dlopen(NV_DRIVER_PATH, RTLD_LOCAL | RTLD_LAZY);
+    if(!nvDriver) return;
     typedef void* (*dlsym_fn)(void *, const char*);
     static dlsym_fn real_dlsym = (dlsym_fn) dlsym(dlopen("libdl.so.2", RTLD_LAZY), "dlsym");
     instanceProcAddr = (decltype(instanceProcAddr)) real_dlsym(nvDriver, "vk_icdGetInstanceProcAddr");
@@ -34,8 +35,12 @@ public:
     negotiateVersion = (decltype(negotiateVersion)) real_dlsym(nvDriver, "vk_icdNegotiateLoaderICDInterfaceVersion");
   }
   ~StaticInitialize(){
-    dlclose(nvDriver);
+    if(nvDriver)
+      dlclose(nvDriver);
     dlclose(glLibGL);
+  }
+  bool IsInited(){
+    return nvDriver != nullptr;
   }
 };
 
@@ -44,17 +49,21 @@ StaticInitialize init;
 extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(
                                                VkInstance instance,
                                                const char* pName){
+  if (!init.IsInited()) return nullptr;
   auto res = init.instanceProcAddr(instance, pName);
   return res;
 }
 
 extern "C" VKAPI_ATTR PFN_vkVoidFunction vk_icdGetPhysicalDeviceProcAddr(VkInstance instance,
 						    const char* pName){
-  
+  if (!init.IsInited()) return nullptr;
   auto res = init.phyProcAddr(instance, pName);
   return res;
 }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t* pSupportedVersion){
+  if (!init.IsInited()) {
+    return VK_ERROR_INCOMPATIBLE_DRIVER;
+  }
   char *prev = getenv("DISPLAY");
   std::string old{prev};
   setenv("DISPLAY", ":8", 1);
