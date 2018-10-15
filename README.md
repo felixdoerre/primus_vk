@@ -79,6 +79,10 @@ Notes for running on Arch Linux:
 * nv_vulkan_wrapper.cpp: Change nvDiver path to `/usr/lib/libGLX_nvidia.so.0`
 * primus_vk.cpp: add: `#include "vk_layer_utils.h"` (on Debian the contents are included in some other header and there is no "vk_layer_utils.h")
 
+### RPM package
+
+Leonid Maksymchuk built RPM packaging scripts for primus-vk which can be found in his [repository](https://github.com/leonmaxx/primus-vk-rpm).
+
 ## Credits
 
 This layer is based on the sample layer available under https://github.com/baldurk/sample_layer. The guide that goes along with it is [https://renderdoc.org/vulkan-layer-guide.html](https://renderdoc.org/vulkan-layer-guide.html).
