@@ -180,7 +180,8 @@ void GLContext::drawSample(){
   gl->ptr_glClear (GL_COLOR_BUFFER_BIT);
   gl->ptr_glXSwapBuffers (data.display, data.win);
 
-  auto toSleep = timespec{.tv_nsec=200000000};
+  auto toSleep = timespec{};
+  toSleep.tv_nsec=200000000;
   nanosleep(&toSleep, nullptr);
 
   gl->ptr_glClearColor (1, 0.5, 0, 1);
