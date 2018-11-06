@@ -1,5 +1,6 @@
 #include "vulkan.h"
 #include "vk_layer.h"
+#include "vk_layer_dispatch_table.h"
 
 #include <xcb/xcb.h>
 #include <vulkan/vulkan_xcb.h>
