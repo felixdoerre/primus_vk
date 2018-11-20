@@ -326,7 +326,7 @@ struct PrimusSwapchain{
     TRACE("Creating a Swapchain thread.");
     size_t thread_count = 1;
     char *m_env = getenv("PRIMUS_VK_MULTITHREADING");
-    if(m_env != nullptr && std::string{m_env} == "1"){
+    if(m_env == nullptr || std::string{m_env} != "1"){
       thread_count = 3;
     }
     threads.resize(thread_count);

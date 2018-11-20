@@ -50,7 +50,7 @@ Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the pat
 2. Patch path in `/usr/share/vulkan/icd.d/nvidia_icd.json` to point to the compiled `libnv_vulkan_wrapper.so`.
 3. Install `primus_vk.json` and adjust path.
 4. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
-5. If you want to have more than 30 FPS and don't care if `primus_vk` uses more CPU resources, set `PRIMUS_VK_MULTITHREADING=1`
+5. If you want `primus_vk` to not copy in parallel (and thereby possibly imact the framerate), set `PRIMUS_VK_MULTITHREADING=0`
 
 I tested this on Debian unstable.
 
