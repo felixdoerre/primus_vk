@@ -24,6 +24,7 @@
 #include <vector>
 #include <memory>
 #include <thread>
+#include <algorithm>
 
 #undef VK_LAYER_EXPORT
 #if defined(WIN32)
@@ -301,7 +302,7 @@ struct PrimusSwapchain{
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
   std::vector<std::unique_ptr<std::thread>> threads;
-  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo):
+  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount):
     device(device), display_device(display_device), backend(backend){
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
@@ -327,7 +328,7 @@ struct PrimusSwapchain{
     size_t thread_count = 1;
     char *m_env = getenv("PRIMUS_VK_MULTITHREADING");
     if(m_env == nullptr || std::string{m_env} != "1"){
-      thread_count = 3;
+      thread_count = imageCount;
     }
     threads.resize(thread_count);
     for(auto &thread: threads){
@@ -673,9 +674,10 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
     cod->join();
     TRACE("joining succeeded. Luckily initialization deadlock did not occur.");
   }
+  TRACE("Application requested " << pCreateInfo->minImageCount << " images.");
   VkDevice render_gpu = device;
   VkSwapchainCreateInfoKHR info2 = *pCreateInfo;
-  info2.minImageCount = 3;
+  info2.minImageCount = std::max(3u, pCreateInfo->minImageCount);
   pCreateInfo = &info2;
   VkSwapchainKHR old = pCreateInfo->oldSwapchain;
   if(old != VK_NULL_HANDLE){
@@ -700,7 +702,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
     return rc;
   }
 
-  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo);
+  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount);
 
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
