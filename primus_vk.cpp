@@ -566,10 +566,10 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
   {
-    scoped_lock l(global_lock);
-    TRACE("spawning secondary device creation");
     static bool first = true;
     if(first){
+      scoped_lock l(global_lock);
+      TRACE("spawning secondary device creation");
       first = false;
       // hopefully the first createFunc has only modified this one field
       layerCreateInfo->u.pLayerInfo = targetLayerInfo;
@@ -664,7 +664,6 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const Vk
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
   {
-    scoped_lock l(global_lock);
     if(cod == nullptr){
       std::cerr << "no thread to join\n";
       return VK_ERROR_INITIALIZATION_FAILED;
