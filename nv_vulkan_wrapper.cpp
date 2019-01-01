@@ -27,7 +27,10 @@ public:
     glLibGL = dlopen("libGL.so.1", RTLD_GLOBAL | RTLD_NOW);
 
     nvDriver = dlopen(NV_DRIVER_PATH, RTLD_LOCAL | RTLD_LAZY);
-    if(!nvDriver) return;
+    if(!nvDriver) {
+      std::cerr << "PrimusVK: ERROR! Nvidia driver could not be loaded from '" NV_DRIVER_PATH "'.\n";
+      return;
+    }
     typedef void* (*dlsym_fn)(void *, const char*);
     static dlsym_fn real_dlsym = (dlsym_fn) dlsym(dlopen("libdl.so.2", RTLD_LAZY), "dlsym");
     instanceProcAddr = (decltype(instanceProcAddr)) real_dlsym(nvDriver, "vk_icdGetInstanceProcAddr");
