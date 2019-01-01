@@ -44,10 +44,16 @@ void *&GetKey(DispatchableType inst)
   return *(void **)inst;
 }
 
+class CreateOtherDevice;
+
 struct InstanceInfo {
   VkInstance instance;
   VkPhysicalDevice render;
   VkPhysicalDevice display;
+
+  CreateOtherDevice *cod;
+
+  bool secondarySpawned;
 };
 
 std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
@@ -55,6 +61,8 @@ VkLayerInstanceDispatchTable loader_dispatch;
 // VkInstance->disp is beeing malloc'ed for every new instance
 // so we can assume it to be a good key.
 std::map<void *, InstanceInfo> instance_info;
+
+std::map<void *, InstanceInfo*> device_instance_info;
 std::map<void *, VkLayerDispatchTable> device_dispatch;
 
 std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
@@ -170,7 +178,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     scoped_lock l(global_lock);
 
     instance_dispatch[GetKey(*pInstance)] = dispatchTable;
-    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display};
+    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .secondarySpawned = false};
   }
 
   return VK_SUCCESS;
@@ -179,9 +187,11 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAllocator)
 {
   scoped_lock l(global_lock);
+
+  instance_dispatch[GetKey(instance)].DestroyInstance(instance, pAllocator);
+
   instance_dispatch.erase(GetKey(instance));
   instance_info.erase(GetKey(instance));
-  // TODO call DestroyInstance down the chain?
 }
 
 struct FramebufferImage;
@@ -302,8 +312,10 @@ struct PrimusSwapchain{
   std::vector<std::shared_ptr<CommandBuffer>> display_commands;
 
   std::vector<std::unique_ptr<std::thread>> threads;
-  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount):
-    device(device), display_device(display_device), backend(backend){
+
+  CreateOtherDevice *cod;
+  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount, CreateOtherDevice *cod):
+    device(device), display_device(display_device), backend(backend), cod(cod){
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
     device_dispatch[GetKey(display_device)].GetDeviceQueue(display_device, 0, 0, &display_queue);
@@ -525,13 +537,13 @@ public:
 };
 
 
-CreateOtherDevice *cod;
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
     VkPhysicalDevice                            physicalDevice,
     const VkDeviceCreateInfo*                   pCreateInfo,
     const VkAllocationCallbacks*                pAllocator,
     VkDevice*                                   pDevice)
 {
+  auto &my_instance_info = instance_info[GetKey(physicalDevice)];
   TRACE("in function: creating device");
   {
     auto info = pCreateInfo;
@@ -567,22 +579,17 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
   {
     static bool first = true;
-    if(first){
+    if(!my_instance_info.secondarySpawned){
       scoped_lock l(global_lock);
-      TRACE("spawning secondary device creation");
-      first = false;
+      my_instance_info.secondarySpawned = true;
+      TRACE("spawning secondary device creation: " << &my_instance_info);
       // hopefully the first createFunc has only modified this one field
       layerCreateInfo->u.pLayerInfo = targetLayerInfo;
       TRACE("After reset:" << layerCreateInfo->u.pLayerInfo);
-      auto display_dev = instance_info[GetKey(physicalDevice)].display;
-      // VkDeviceCreateInfo displayCreate{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-      //VkDevice display_dev = {};
-      // VK_CHECK_RESULT(dispatchTable.CreateDevice(display, &displayCreate, nullptr, &display_dev));
+      auto display_dev = my_instance_info.display;
 
-
-
-      cod = new CreateOtherDevice{display_dev, physicalDevice, *pDevice};
-      cod->start();
+      my_instance_info.cod = new CreateOtherDevice{display_dev, physicalDevice, *pDevice};
+      my_instance_info.cod->start();
       pthread_yield();
     }
   }
@@ -590,6 +597,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   // store the table by key
   {
     scoped_lock l(global_lock);
+    device_instance_info[GetKey(*pDevice)] = &my_instance_info;
     device_dispatch[GetKey(*pDevice)] = fetchDispatchTable(gdpa, pDevice);
   }
   TRACE("CreateDevice done");
@@ -663,14 +671,15 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const Vk
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
+  auto &my_instance = *device_instance_info[GetKey(device)];
   {
-    if(cod == nullptr){
+    if(my_instance.cod == nullptr){
       std::cerr << "no thread to join\n";
       return VK_ERROR_INITIALIZATION_FAILED;
     }
     TRACE("joining secondary device creation");
     TRACE("When startup hangs here, you have probably hit the initialization deadlock");
-    cod->join();
+    my_instance.cod->join();
     TRACE("joining succeeded. Luckily initialization deadlock did not occur.");
   }
   TRACE("Application requested " << pCreateInfo->minImageCount << " images.");
@@ -687,7 +696,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   TRACE("Creating Swapchain for size: " << pCreateInfo->imageExtent.width << "x" << pCreateInfo->imageExtent.height);
   TRACE("MinImageCount: " << pCreateInfo->minImageCount);
   TRACE("fetching device for: " << GetKey(render_gpu));
-  VkDevice display_gpu = cod->display_gpu;
+  VkDevice display_gpu = my_instance.cod->display_gpu;
   TRACE("found: " << GetKey(display_gpu));
 
   TRACE("FamilyIndexCount: " <<  pCreateInfo->queueFamilyIndexCount);
@@ -701,7 +710,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
     return rc;
   }
 
-  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount);
+  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount, my_instance.cod);
 
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
