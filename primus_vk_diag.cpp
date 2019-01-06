@@ -82,6 +82,25 @@ VulkanContext::VulkanContext(){
     std::vector<VkQueueFamilyProperties> data(queues);
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queues, data.data());
     std::cout << self << "   Queues: " << queues << std::endl;
+
+    VkDeviceQueueCreateInfo queue1{};
+    queue1.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue1.queueFamilyIndex = 0;
+    queue1.queueCount = 1;
+    float prio = 1;
+    queue1.pQueuePriorities = &prio;
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pQueueCreateInfos = &queue1;
+    createInfo.queueCreateInfoCount = 1;
+    VkDevice dev;
+    VkResult res = vkCreateDevice(device, &createInfo, nullptr, &dev);
+    if(res == VK_SUCCESS) {
+      std::cout << "Device creation succeeded\n";
+    } else {
+      std::cout << "Device creation failed: " << res << "\n";
+    }
+    vkDestroyDevice(dev, nullptr);
   }
 }
 VulkanContext::~VulkanContext(){
