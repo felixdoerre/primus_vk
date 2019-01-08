@@ -16,23 +16,23 @@ function step_0 {
 }
 function step_1 {
     printf "===== Round 1: Plain Vulkan =====\n"
-    ./primus-vk-diag vulkan 2>&1
+    ./primus_vk_diag vulkan 2>&1
 }
 function step_2 {
     printf "===== Round 2: Vulkan with optirun =====\n"
-    optirun ./primus-vk-diag vulkan 2>&1
+    optirun ./primus_vk_diag vulkan 2>&1
 }
 function step_3 {
     printf "===== Round 3: Vulkan with optirun and Primus layer =====\n"
-    ENABLE_PRIMUS_LAYER=1 optirun ./primus-vk-diag vulkan 2>&1
+    ENABLE_PRIMUS_LAYER=1 optirun ./primus_vk_diag vulkan 2>&1
 }
 function step_4 {
     printf "===== Round 4: Mixed Vulkan and OpenGL with Primus layer =====\n"
-    ENABLE_PRIMUS_LAYER=1 optirun ./primus-vk-diag vulkan gl vulkan 2>&1
+    ENABLE_PRIMUS_LAYER=1 optirun ./primus_vk_diag vulkan gl vulkan 2>&1
 }
 function step_5 {
     printf "===== Round 5: Mixed Vulkan and OpenGL with Primus layer while forcing primus-libGLa =====\n"
-    ENABLE_PRIMUS_LAYER=1 optirun env PRIMUS_libGLa=/usr/lib/x86_64-linux-gnu/nvidia/current/libGLX_nvidia.so.0 ./primus-vk-diag vulkan gl vulkan 2>&1
+    ENABLE_PRIMUS_LAYER=1 optirun env PRIMUS_libGLa=/usr/lib/x86_64-linux-gnu/nvidia/current/libGLX_nvidia.so.0 ./primus_vk_diag vulkan gl vulkan 2>&1
 }
 
 if [[ $# == 0 ]]; then
