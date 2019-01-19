@@ -1137,6 +1137,27 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
   }
   return res;
 }
+VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroups(
+    VkInstance                                  instance,
+    uint32_t*                                   pPhysicalDeviceGroupCount,
+    VkPhysicalDeviceGroupProperties*            pPhysicalDeviceGroupProperties) {
+  InstanceInfo &info = instance_info[GetKey(instance)];
+  *pPhysicalDeviceGroupCount = 1;
+  if(pPhysicalDeviceGroupProperties){
+    pPhysicalDeviceGroupProperties[0].sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES;
+    pPhysicalDeviceGroupProperties[0].pNext = nullptr;
+    pPhysicalDeviceGroupProperties[0].physicalDeviceCount = 1;
+    pPhysicalDeviceGroupProperties[0].physicalDevices[0] = info.render;
+    pPhysicalDeviceGroupProperties[0].subsetAllocation = VK_FALSE;
+  }
+  return VK_SUCCESS;
+}
+VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroupsKHR(
+    VkInstance                                  instance,
+    uint32_t*                                   pPhysicalDeviceGroupCount,
+    VkPhysicalDeviceGroupProperties*            pPhysicalDeviceGroupProperties) {
+  return PrimusVK_EnumeratePhysicalDeviceGroups(instance, pPhysicalDeviceGroupCount, pPhysicalDeviceGroupProperties);
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -1176,6 +1197,8 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
   // instance chain functions we intercept
   GETPROCADDR(GetInstanceProcAddr);
   GETPROCADDR(EnumeratePhysicalDevices);
+  GETPROCADDR(EnumeratePhysicalDeviceGroups);
+  GETPROCADDR(EnumeratePhysicalDeviceGroupsKHR);
   GETPROCADDR(EnumerateInstanceLayerProperties);
   GETPROCADDR(EnumerateInstanceExtensionProperties);
   GETPROCADDR(CreateInstance);
