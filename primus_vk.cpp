@@ -178,7 +178,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     scoped_lock l(global_lock);
 
     instance_dispatch[GetKey(*pInstance)] = dispatchTable;
-    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .secondarySpawned = false};
+    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .cod=nullptr, .secondarySpawned = false};
   }
 
   return VK_SUCCESS;
