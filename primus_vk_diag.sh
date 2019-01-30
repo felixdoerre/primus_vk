@@ -2,6 +2,7 @@
 
 export VK_LOADER_DEBUG=warn,error,info
 export LD_DEBUG=libs
+export ENABLE_PRIMUS_LAYER=0
 
 function step_0 {
     printf "===== Round 0: Vulkaninfo =====\n"
