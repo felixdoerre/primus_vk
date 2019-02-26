@@ -368,6 +368,7 @@ struct PrimusSwapchain{
     std::unique_ptr<Fence> fence;
   };
   std::list<QueueItem> work;
+  std::list<QueueItem> in_progress;
   void present(const QueueItem &workItem);
   void run();
   void stop();
@@ -982,24 +983,28 @@ void PrimusSwapchain::present(const QueueItem &workItem){
 
     {
       std::unique_lock<std::mutex> lock(queueMutex);
+      has_work.wait(lock, [this,&workItem](){return &workItem == &in_progress.front();});
       TRACE_PROFILING_EVENT(index, "submitting");
       VkResult res = device_dispatch[GetKey(display_queue)].QueuePresentKHR(display_queue, &p2);
       if(res != VK_SUCCESS) {
 	TRACE("ERROR, Queue Present failed\n");
       }
+      in_progress.pop_front();
+      has_work.notify_all();
     }
 }
 void PrimusSwapchain::run(){
   while(true){
-    QueueItem workItem{};
+    QueueItem *workItem = nullptr;
     {
       std::unique_lock<std::mutex> lock(queueMutex);
       has_work.wait(lock, [this](){return !active || work.size() > 0;});
       if(!active) return;
-      workItem = std::move(work.front());
+      in_progress.push_back(std::move(work.front()));
+      workItem = &in_progress.back();
       work.pop_front();
     }
-    present(workItem);
+    present(*workItem);
   }
 }
 
