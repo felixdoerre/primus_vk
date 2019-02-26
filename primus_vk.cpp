@@ -5,8 +5,8 @@
 #include <xcb/xcb.h>
 #include <vulkan/vulkan_xcb.h>
 
-#include <assert.h>
-#include <string.h>
+#include <cassert>
+#include <cstring>
 
 #include <mutex>
 #include <condition_variable>
@@ -25,6 +25,8 @@
 #include <memory>
 #include <thread>
 #include <algorithm>
+#include <string>
+#include <chrono>
 
 #undef VK_LAYER_EXPORT
 #if defined(WIN32)
@@ -209,6 +211,7 @@ struct FramebufferImage {
   VkDevice device;
 
   std::shared_ptr<MappedMemory> mapped;
+  FramebufferImage(FramebufferImage &) = delete;
   FramebufferImage(VkDevice device, VkExtent2D size, VkImageTiling tiling, VkImageUsageFlags usage, int memoryTypeIndex): device(device){
     TRACE("Creating image: " << size.width << "x" << size.height);
     VkImageCreateInfo imageCreateCI {};
@@ -273,7 +276,6 @@ public:
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateFence(device, &fenceInfo, nullptr, &fence));
   }
   void await(){
-    const auto start = std::chrono::steady_clock::now();
     // Wait for the fence to signal that command buffer has finished executing
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].WaitForFences(device, 1, &fence, VK_TRUE, 10000000000L));
   }
@@ -314,6 +316,7 @@ struct PrimusSwapchain{
   std::vector<std::unique_ptr<std::thread>> threads;
 
   CreateOtherDevice *cod;
+  PrimusSwapchain(PrimusSwapchain &) = delete;
   PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount, CreateOtherDevice *cod):
     device(device), display_device(display_device), backend(backend), cod(cod){
     // TODO automatically find correct queue and not choose 0 forcibly
@@ -723,9 +726,8 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, Vk
     if(swapchain == VK_NULL_HANDLE) { return;}
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
   TRACE(">> Destroy swapchain: " << (void*) ch->backend);
-  // TODO: the Nvidia driver segfaults when passing a chain here?
-  // device_dispatch[GetKey(device)].DestroySwapchainKHR(device, ch->backend, pAllocator);
   ch->stop();
+  device_dispatch[GetKey(device)].DestroySwapchainKHR(device, ch->backend, pAllocator);
   delete ch;
 }
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages) {
@@ -771,10 +773,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
 
   return res;
 }
-#include <iostream>
-#include <string>
-#include <fstream>
-#include <algorithm>
 
 void PrimusSwapchain::initImages(){
 
@@ -902,14 +900,8 @@ void PrimusSwapchain::createCommandBuffers(){
 void PrimusSwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify){
   render_copy_commands[index]->submit(queue, notify.fence, wait_on);
 }
-#include <chrono>
 
 void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
-  {
-    std::unique_lock<std::mutex> lock(queueMutex);
-    has_work.notify_all();
-  }
-
   {
     auto rendered = render_copy_images[index]->getMapped();
     auto display = display_src_images[index]->getMapped();
@@ -922,9 +914,8 @@ void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sem
       throw std::runtime_error("Layouts don't match at all");
     }
     TRACE_PROFILING_EVENT(index, "memcpy start");
-    auto start = std::chrono::steady_clock::now();
     if(rendered_layout.rowPitch == display_layout.rowPitch){
-      memcpy(display_start, rendered_start, rendered_layout.size);
+      std::memcpy(display_start, rendered_start, rendered_layout.size);
     }else{
       VkDeviceSize display_offset = 0;
       VkDeviceSize minRowPitch = rendered_layout.rowPitch;
@@ -932,7 +923,7 @@ void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sem
 	minRowPitch = display_layout.rowPitch;
       }
       for(VkDeviceSize offset = 0; offset < rendered_layout.size; offset += rendered_layout.rowPitch){
-	memcpy(display_start + display_offset, rendered_start + offset, minRowPitch);
+	std::memcpy(display_start + display_offset, rendered_start + offset, minRowPitch);
 	display_offset += display_layout.rowPitch;
       }
     }
@@ -969,7 +960,6 @@ void PrimusSwapchain::present(const QueueItem &workItem){
     workItem.fence->await();
     const auto index = workItem.imgIndex;
 
-    const auto start = std::chrono::steady_clock::now();
     copyImageData(index, {sem->sem});
 
     TRACE_PROFILING_EVENT(index, "copy queued");
