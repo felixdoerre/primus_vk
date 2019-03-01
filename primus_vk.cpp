@@ -749,9 +749,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice devi
 const auto primus_start = std::chrono::steady_clock::now();
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
-  if(fence != VK_NULL_HANDLE){
-    TRACE("Error, fence in acquireNextImage not implemented");
-  }
   TRACE_PROFILING_EVENT(-1, "Acquire starting");
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
 
@@ -768,7 +765,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
   qsi.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   qsi.signalSemaphoreCount = 1;
   qsi.pSignalSemaphores = &semaphore;
-  device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, VK_NULL_HANDLE);
+  device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, fence);
   TRACE_PROFILING_EVENT(*pImageIndex, "Acquire done");
 
   return res;
