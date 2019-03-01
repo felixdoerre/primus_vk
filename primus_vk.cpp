@@ -25,6 +25,7 @@
 #include <memory>
 #include <thread>
 #include <algorithm>
+#include <sstream>
 #include <string>
 #include <chrono>
 
@@ -83,6 +84,28 @@ std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 // #define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
 
 
+void GetEnvVendorDeviceIDs(std::string env, uint32_t &vendor, uint32_t &device)
+{
+  char *envstr = getenv(env.c_str());
+  if(envstr != nullptr){
+    std::stringstream ss(envstr);
+    std::string item;
+    std::vector<std::string> elems;
+    std::vector<uint32_t> hexnums(2);
+    int i = 0;
+    while(std::getline(ss, item, ':')) {
+      uint32_t num = 0;
+      std::stringstream _ss;
+      _ss << std::hex << item;
+      _ss >> num;
+      hexnums[i] = num;
+      ++i;
+    }
+    vendor = hexnums[0];
+    device = hexnums[1];
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Layer init and shutdown
 VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice);
@@ -125,6 +148,13 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   FORWARD(GetPhysicalDeviceProperties);
 #undef FORWARD
 
+  uint32_t displayVendorID = 0;
+  uint32_t displayDeviceID = 0;
+  uint32_t renderVendorID = 0;
+  uint32_t renderDeviceID = 0;
+  GetEnvVendorDeviceIDs("PRIMUS_VK_DISPLAYID", displayVendorID, displayDeviceID);
+  GetEnvVendorDeviceIDs("PRIMUS_VK_RENDERID", renderVendorID, renderDeviceID);
+
   std::vector<VkPhysicalDevice> physicalDevices;
   {
     auto enumerateDevices = dispatchTable.EnumeratePhysicalDevices;
@@ -140,14 +170,42 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     VkPhysicalDeviceProperties props;
     dispatchTable.GetPhysicalDeviceProperties(dev, &props);
     TRACE(GetKey(dev) << ": ");
-    if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
-      display = dev;
-      TRACE("got display!");
+    if(displayVendorID != 0){
+      if(props.vendorID == displayVendorID){
+        if(props.deviceID == displayDeviceID){
+          display = dev;
+          TRACE("got display from PRIMUS_VK_DISPLAYID!");
+        }
+        else {
+          display = dev;
+          TRACE("got display from PRIMUS_VK_DISPLAYID (via vendorID)!");
+        }
+      }
+    } else {
+      if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
+        display = dev;
+        TRACE("got integrated display!");
+      }
     }
-    if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU){
-      TRACE("got render!");
-      render = dev;
+
+    if(renderVendorID != 0){
+      if(props.vendorID == renderVendorID){
+        if(props.deviceID == renderDeviceID){
+          render = dev;
+          TRACE("got render from PRIMUS_VK_RENDERID!");
+        }
+        else {
+          render = dev;
+          TRACE("got render from PRIMUS_VK_RENDERID (via vendorID)!");
+        }
+      }
+    } else {
+      if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU){
+        render = dev;
+        TRACE("got discrete display!");
+      }
     }
+
     TRACE("Device: " << props.deviceName);
     TRACE("  Type: " << props.deviceType);
   }
