@@ -90,10 +90,9 @@ void GetEnvVendorDeviceIDs(std::string env, uint32_t &vendor, uint32_t &device)
   if(envstr != nullptr){
     std::stringstream ss(envstr);
     std::string item;
-    std::vector<std::string> elems;
     std::vector<uint32_t> hexnums(2);
     int i = 0;
-    while(std::getline(ss, item, ':')) {
+    while(std::getline(ss, item, ':') && (i < 2)) {
       uint32_t num = 0;
       std::stringstream _ss;
       _ss << std::hex << item;
@@ -104,6 +103,37 @@ void GetEnvVendorDeviceIDs(std::string env, uint32_t &vendor, uint32_t &device)
     vendor = hexnums[0];
     device = hexnums[1];
   }
+}
+
+bool IsDevice(
+  VkPhysicalDeviceProperties props, 
+  uint32_t vendor, 
+  uint32_t device, 
+  VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+{
+  if((vendor == 0) && (props.deviceType == type)){
+    if(type == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
+      TRACE("Got integrated gpu!");
+    } else {
+      TRACE("Got discrete gpu!");
+    }
+    TRACE("Device: " << props.deviceName);
+    TRACE("  Type: " << props.deviceType);
+    return true;
+  }
+  if((props.vendorID == vendor) && (props.deviceID == device)){
+    TRACE("Got device from env!");
+    TRACE("Device: " << props.deviceName);
+    TRACE("  Type: " << props.deviceType);
+    return true;
+  }
+  if(props.vendorID == vendor){
+    TRACE("Got device from env! (via vendorID)");
+    TRACE("Device: " << props.deviceName);
+    TRACE("  Type: " << props.deviceType);
+    return true;
+  }
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -164,51 +194,31 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     physicalDevices.resize(gpuCount);
     enumerateDevices(*pInstance, &gpuCount, physicalDevices.data());
   }
+
+  TRACE("Searching for display GPU:");
   VkPhysicalDevice display = VK_NULL_HANDLE;
+  for(auto &dev: physicalDevices){
+    VkPhysicalDeviceProperties props;
+    dispatchTable.GetPhysicalDeviceProperties(dev, &props);
+    TRACE(GetKey(dev) << ": ");
+    if(IsDevice(props, displayVendorID, displayDeviceID, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)){
+      display = dev;
+      break;
+    }
+  }
+
+  TRACE("Searching for render GPU:");
   VkPhysicalDevice render = VK_NULL_HANDLE;
   for(auto &dev: physicalDevices){
     VkPhysicalDeviceProperties props;
     dispatchTable.GetPhysicalDeviceProperties(dev, &props);
     TRACE(GetKey(dev) << ": ");
-    if(displayVendorID != 0){
-      if(props.vendorID == displayVendorID){
-        if(props.deviceID == displayDeviceID){
-          display = dev;
-          TRACE("got display from PRIMUS_VK_DISPLAYID!");
-        }
-        else {
-          display = dev;
-          TRACE("got display from PRIMUS_VK_DISPLAYID (via vendorID)!");
-        }
-      }
-    } else {
-      if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
-        display = dev;
-        TRACE("got integrated display!");
-      }
+    if(IsDevice(props, renderVendorID, renderDeviceID)){
+      render = dev;
+      break;
     }
-
-    if(renderVendorID != 0){
-      if(props.vendorID == renderVendorID){
-        if(props.deviceID == renderDeviceID){
-          render = dev;
-          TRACE("got render from PRIMUS_VK_RENDERID!");
-        }
-        else {
-          render = dev;
-          TRACE("got render from PRIMUS_VK_RENDERID (via vendorID)!");
-        }
-      }
-    } else {
-      if(props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU){
-        render = dev;
-        TRACE("got discrete display!");
-      }
-    }
-
-    TRACE("Device: " << props.deviceName);
-    TRACE("  Type: " << props.deviceType);
   }
+
   if(display == VK_NULL_HANDLE) {
     TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?");
   }
