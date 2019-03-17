@@ -795,7 +795,7 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, Vk
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
   TRACE(">> Destroy swapchain: " << (void*) ch->backend);
   ch->stop();
-  device_dispatch[GetKey(device)].DestroySwapchainKHR(device, ch->backend, pAllocator);
+  device_dispatch[GetKey(ch->display_device)].DestroySwapchainKHR(ch->display_device, ch->backend, pAllocator);
   delete ch;
 }
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages) {
