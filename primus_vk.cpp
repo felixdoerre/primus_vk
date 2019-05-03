@@ -975,7 +975,7 @@ void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sem
     auto rendered_start = rendered->data + rendered_layout.offset;
     auto display_start = display->data + display_layout.offset;
     if(rendered_layout.size/rendered_layout.rowPitch != display_layout.size/display_layout.rowPitch){
-      TRACE("Layouts don't match at all");
+      TRACE("Layouts don't match at all: " << rendered_layout.size << " / " << rendered_layout.rowPitch << " != " << display_layout.size << " / " << display_layout.rowPitch  );
       throw std::runtime_error("Layouts don't match at all");
     }
     TRACE_PROFILING_EVENT(index, "memcpy start");
