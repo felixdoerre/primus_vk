@@ -301,6 +301,7 @@ struct FramebufferImage {
     VkMemoryAllocateInfo memAllocInfo {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     device_dispatch[GetKey(device)].GetImageMemoryRequirements(device, img, &memRequirements);
     memAllocInfo.allocationSize = memRequirements.size;
+    TRACE("Which requires " << memRequirements.size << " bytes of memory")
     memAllocInfo.memoryTypeIndex = memoryTypeIndex;
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].AllocateMemory(device, &memAllocInfo, nullptr, &mem));
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].BindImageMemory(device, img, mem, 0));
