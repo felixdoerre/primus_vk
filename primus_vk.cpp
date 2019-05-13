@@ -218,14 +218,19 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
       break;
     }
   }
-
-  if(display == VK_NULL_HANDLE) {
-    TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?");
-  }
-  if(render == VK_NULL_HANDLE) {
-    TRACE("No device for the rendering GPU found. Is the correct driver installed?");
-  }
   if(display == VK_NULL_HANDLE || render == VK_NULL_HANDLE){
+    const auto c_icd_filenames = getenv("VK_ICD_FILENAMES");
+    if(display == VK_NULL_HANDLE) {
+      TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?");
+    }
+    if(render == VK_NULL_HANDLE) {
+      TRACE("No device for the rendering GPU found. Is the correct driver installed?");
+    }
+    if(c_icd_filenames != nullptr) {
+      TRACE("VK_ICD_FILENAMES=" << c_icd_filenames);
+    } else {
+      TRACE("VK_ICD_FILENAMES not set");
+    }
     return VK_ERROR_INITIALIZATION_FAILED;
   }
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
