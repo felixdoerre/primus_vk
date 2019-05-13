@@ -50,6 +50,7 @@ Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the pat
 2. Patch path in `/usr/share/vulkan/icd.d/nvidia_icd.json` to point to the compiled `libnv_vulkan_wrapper.so`.
 3. Install `primus_vk.json` and adjust path.
 4. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
+ If you want to specify the devices used for rendering and displaying manually, you can use `PRIMUS_VK_DISPLAYID` and `PRIMUS_VK_RENDERID` and give them the `deviceID`s from `optirun env DISPLAY=:8 vulkaninfo`.
 5. If you want `primus_vk` to not copy in parallel (and thereby possibly imact the framerate), set `PRIMUS_VK_MULTITHREADING=0`
 
 I tested this on Debian unstable.
