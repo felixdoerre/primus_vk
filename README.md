@@ -4,6 +4,12 @@ This Vulkan layer can be used to do GPU offloading. Typically you want to displa
 
 It is basically the same as Primus for OpenGL (https://github.com/amonakov/primus). However it does not wrap the Vulkan API from the application but is directly integrated into Vulkan as a layer (which seems to be the intendend way to implement such logic).
 
+## Usage
+
+First you need to install `primus_vk`. On Archlinux there are official packages ([for 64-bit games](https://www.archlinux.org/packages/community/x86_64/primus_vk/), [for 32-bit games](https://www.archlinux.org/packages/multilib/x86_64/lib32-primus_vk/)). For other distributions you will likely need to [manually install](#installation) `primus_vk`.
+
+To run an application with `primus_vk` prefix the command with `ENABLE_PRIMUS_LAYER=1 optirun`. So instead of running `path/to/application`, invoke `ENABLE_PRIMUS_LAYER=1 optirun path/to/application` instead.
+
 ## Idea
 
 Just as the OpenGL-Primus: Let the application talk to the primary display and transparently map API calls so that the application thinks, it renders using the primary display, however the `VkDevice` (and `VkImage`s) comes from the rendering GPU.
@@ -48,10 +54,10 @@ Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the pat
 
 1. Use `make libprimus_vk.so libnv_vulkan_wrapper.so` to compile Primus-vk and `libnv_vulkan_wrapper.so` (check that the path to the nvidia-driver in `nv_vulkan_wrapper.so` is correct).
 2. Patch path in `/usr/share/vulkan/icd.d/nvidia_icd.json` to point to the compiled `libnv_vulkan_wrapper.so`.
-3. Install `primus_vk.json` and adjust path.
-4. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
+3. (Optional) Run `optirun primus_vk_diag`. It has to display entries for both graphics cards, otherwise the driver setup is broken.
+4. Install `primus_vk.json` and adjust path.
+5. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
  If you want to specify the devices used for rendering and displaying manually, you can use `PRIMUS_VK_DISPLAYID` and `PRIMUS_VK_RENDERID` and give them the `deviceID`s from `optirun env DISPLAY=:8 vulkaninfo`.
-5. If you want `primus_vk` to not copy in parallel (and thereby possibly imact the framerate), set `PRIMUS_VK_MULTITHREADING=0`
 
 I tested this on Debian unstable.
 
