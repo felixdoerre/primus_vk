@@ -234,11 +234,8 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     return VK_ERROR_INITIALIZATION_FAILED;
   }
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
-  FORWARD(GetPhysicalDeviceSurfaceFormatsKHR);
   FORWARD(GetPhysicalDeviceQueueFamilyProperties);
-  FORWARD(GetPhysicalDeviceSurfaceCapabilitiesKHR);
-  FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
-  FORWARD(GetPhysicalDeviceSurfacePresentModesKHR);
+#include "primus_vk_forwarding.h"
 #undef FORWARD
 
 #define _FORWARD(x) loader_dispatch.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
@@ -1092,36 +1089,12 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateXcbSurfaceKHR(VkInstance inst
   return fn(instance, pCreateInfo, pAllocator, pSurface);
 }
 
-
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormatsKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pSurfaceFormatCount, VkSurfaceFormatKHR* pSurfaceFormats) {
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormatsKHR(phy, surface, pSurfaceFormatCount, pSurfaceFormats);
-}
-
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physicalDevice, uint32_t* pQueueFamilyPropertyCount, VkQueueFamilyProperties* pQueueFamilyProperties) {
   VkPhysicalDevice phy = physicalDevice;
   instance_dispatch[GetKey(phy)].GetPhysicalDeviceQueueFamilyProperties(phy, pQueueFamilyPropertyCount, pQueueFamilyProperties);
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities) {
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceCapabilitiesKHR(phy, surface, pSurfaceCapabilities);
-}
-
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, VkSurfaceKHR surface, VkBool32* pSupported) {
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  queueFamilyIndex = 0;
-  auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, queueFamilyIndex, surface, pSupported);
-  TRACE("Support: " << GetKey(phy) << ", " << *pSupported);
-  return res;
-}
-
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pPresentModeCount, VkPresentModeKHR* pPresentModes) {
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  auto res = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfacePresentModesKHR(phy, surface, pPresentModeCount, pPresentModes);
-  return res;
-}
-
+#include "primus_vk_forwarding_prototypes.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Enumeration function
@@ -1244,11 +1217,9 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetDeviceProcAddr(VkDevic
   GETPROCADDR(GetSwapchainImagesKHR);
   GETPROCADDR(AcquireNextImageKHR);
   GETPROCADDR(QueuePresentKHR);
-  GETPROCADDR(GetPhysicalDeviceSurfaceFormatsKHR);
-  GETPROCADDR(GetPhysicalDeviceQueueFamilyProperties);
-  GETPROCADDR(GetPhysicalDeviceSurfaceCapabilitiesKHR);
-  GETPROCADDR(GetPhysicalDeviceSurfaceSupportKHR);
-  GETPROCADDR(GetPhysicalDeviceSurfacePresentModesKHR);
+#define FORWARD(func) GETPROCADDR(func)
+#include "primus_vk_forwarding.h"
+#undef FORWARD
   GETPROCADDR(CreateXcbSurfaceKHR);
 
   {
@@ -1281,13 +1252,13 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
   GETPROCADDR(GetSwapchainImagesKHR);
   GETPROCADDR(AcquireNextImageKHR);
   GETPROCADDR(QueuePresentKHR);
-  GETPROCADDR(GetPhysicalDeviceSurfaceFormatsKHR);
   GETPROCADDR(GetPhysicalDeviceQueueFamilyProperties);
-  GETPROCADDR(GetPhysicalDeviceSurfaceCapabilitiesKHR);
-  GETPROCADDR(GetPhysicalDeviceSurfaceSupportKHR);
-  GETPROCADDR(GetPhysicalDeviceSurfacePresentModesKHR);
-  // GETPROCADDR(CreateXcbSurfaceKHR);
 
+#define FORWARD(func) GETPROCADDR(func)
+#include "primus_vk_forwarding.h"
+#undef FORWARD
+
+  // GETPROCADDR(CreateXcbSurfaceKHR);
   {
     scoped_lock l(global_lock);
     return instance_dispatch[GetKey(instance)].GetInstanceProcAddr(instance, pName);

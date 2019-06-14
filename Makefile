@@ -19,6 +19,14 @@ libprimus_vk.so: primus_vk.cpp
 libnv_vulkan_wrapper.so: nv_vulkan_wrapper.cpp
 	g++ $(CXXFLAGS) -I/usr/include/vulkan -shared -fPIC $^ -o $@
 
+primus_vk_forwarding.h:
+	xsltproc surface_forwarding_functions.xslt /usr/share/vulkan/registry/vk.xml | tail -n +2 > $@
+
+primus_vk_forwarding_prototypes.h:
+	xsltproc surface_forwarding_prototypes.xslt /usr/share/vulkan/registry/vk.xml | tail -n +2 > $@
+
+primus_vk.cpp: primus_vk_forwarding.h primus_vk_forwarding_prototypes.h
+
 primus_vk_diag: primus_vk_diag.o
 	g++ -g3 -o $@ $^ -lX11 -lvulkan -ldl
 
