@@ -282,12 +282,12 @@ struct FramebufferImage {
 
   std::shared_ptr<MappedMemory> mapped;
   FramebufferImage(FramebufferImage &) = delete;
-  FramebufferImage(VkDevice device, VkExtent2D size, VkImageTiling tiling, VkImageUsageFlags usage, int memoryTypeIndex): device(device){
+  FramebufferImage(VkDevice device, VkExtent2D size, VkImageTiling tiling, VkImageUsageFlags usage, VkFormat format, int memoryTypeIndex): device(device){
     TRACE("Creating image: " << size.width << "x" << size.height);
     VkImageCreateInfo imageCreateCI {};
     imageCreateCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageCreateCI.imageType = VK_IMAGE_TYPE_2D;
-    imageCreateCI.format = VK_FORMAT_B8G8R8A8_UNORM;
+    imageCreateCI.format = format;
     imageCreateCI.extent.width = size.width;
     imageCreateCI.extent.height = size.height;
     imageCreateCI.extent.depth = 1;
@@ -349,8 +349,13 @@ public:
     // Wait for the fence to signal that command buffer has finished executing
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].WaitForFences(device, 1, &fence, VK_TRUE, 10000000000L));
   }
+  Fence(Fence &&other): device(other.device), fence(other.fence){
+    other.fence = VK_NULL_HANDLE;
+  }
   ~Fence(){
-    device_dispatch[GetKey(device)].DestroyFence(device, fence, nullptr);
+    if(fence != VK_NULL_HANDLE){
+      device_dispatch[GetKey(device)].DestroyFence(device, fence, nullptr);
+    }
   }
 };
 class Semaphore{
@@ -362,8 +367,24 @@ public:
     semInfo.flags = 0;
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateSemaphore(device, &semInfo, nullptr, &sem));
   }
+  Semaphore(Semaphore &&other): device(other.device), sem(other.sem) {
+    other.sem = VK_NULL_HANDLE;
+    other.device = VK_NULL_HANDLE;
+  }
   ~Semaphore(){
-    device_dispatch[GetKey(device)].DestroySemaphore(device, sem, nullptr);
+    if(sem != VK_NULL_HANDLE){
+      device_dispatch[GetKey(device)].DestroySemaphore(device, sem, nullptr);
+    }
+  }
+};
+struct ImageWorker {
+  std::shared_ptr<FramebufferImage> render_image;
+  std::shared_ptr<FramebufferImage> render_copy_image;
+  std::shared_ptr<FramebufferImage> display_src_image;
+  Semaphore display_semaphore;
+  VkImage display_image = VK_NULL_HANDLE;
+
+  ImageWorker(VkDevice device, VkDevice display_device): display_semaphore(display_device){
   }
 };
 struct PrimusSwapchain{
@@ -374,6 +395,7 @@ struct PrimusSwapchain{
   std::mutex displayQueueMutex;
   VkQueue display_queue;
   VkSwapchainKHR backend;
+  std::vector<ImageWorker> images;
   std::vector<std::shared_ptr<FramebufferImage>> render_images;
   std::vector<std::shared_ptr<FramebufferImage>> render_copy_images;
   std::vector<std::shared_ptr<FramebufferImage>> display_src_images;
@@ -406,8 +428,11 @@ struct PrimusSwapchain{
     render_copy_commands.resize(image_count);
     imgSize = pCreateInfo->imageExtent;
 
-    initImages();
+    initImages(pCreateInfo->imageFormat);
     createCommandBuffers();
+    for(uint32_t i = 0; i < imageCount; i++){
+      images.emplace_back(device, display_device);
+    }
 
     TRACE("Creating a Swapchain thread.");
     size_t thread_count = 1;
@@ -422,12 +447,12 @@ struct PrimusSwapchain{
     }
   }
 
-  void initImages();
+  void initImages(VkFormat format);
 
   void createCommandBuffers();
 
   void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
-  void storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify);
+  void storeImage(uint32_t index, VkQueue queue, std::vector<VkSemaphore> wait_on, Fence &notify);
 
   void queue(VkQueue queue, const VkPresentInfoKHR *pPresentInfo);
 
@@ -598,12 +623,16 @@ public:
   void end(){
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].EndCommandBuffer(cmd));
   }
-  void submit(VkQueue queue, VkFence fence, std::vector<VkSemaphore> semaphores){
+  void submit(VkQueue queue, VkFence fence, std::vector<VkSemaphore> wait = {}, std::vector<VkSemaphore> signal = {}){
     VkSubmitInfo submitInfo = {.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmd;
-    submitInfo.waitSemaphoreCount = semaphores.size();
-    submitInfo.pWaitSemaphores = semaphores.data();
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    submitInfo.pWaitDstStageMask = &waitStage;
+    submitInfo.waitSemaphoreCount = wait.size();
+    submitInfo.pWaitSemaphores = wait.data();
+    submitInfo.signalSemaphoreCount = signal.size();
+    submitInfo.pSignalSemaphores = signal.data();
 
     // Submit to the queue
     VK_CHECK_RESULT(device_dispatch[GetKey(queue)].QueueSubmit(queue, 1, &submitInfo, fence));
@@ -760,7 +789,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   VkDevice render_gpu = device;
   VkSwapchainCreateInfoKHR info2 = *pCreateInfo;
   info2.minImageCount = std::max(3u, pCreateInfo->minImageCount);
+  info2.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   pCreateInfo = &info2;
+  
   VkSwapchainKHR old = pCreateInfo->oldSwapchain;
   if(old != VK_NULL_HANDLE){
     PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(old);
@@ -841,7 +872,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
   return res;
 }
 
-void PrimusSwapchain::initImages(){
+void PrimusSwapchain::initImages(VkFormat format){
 
   VkMemoryPropertyFlags host_mem = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
   VkMemoryPropertyFlags local_mem = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -865,13 +896,13 @@ void PrimusSwapchain::initImages(){
   size_t i = 0;
   for( auto &renderImage: render_images){
     renderImage = std::make_shared<FramebufferImage>(device, imgSize,
-        VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT, render_local_mem);
+						     VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT,format, render_local_mem);
     auto &renderCopyImage = render_copy_images[i];
     renderCopyImage = std::make_shared<FramebufferImage>(device, imgSize,
-	VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_DST_BIT, render_host_mem);
+							 VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_DST_BIT,format, render_host_mem);
     auto &displaySrcImage = display_src_images[i++];
     displaySrcImage = std::make_shared<FramebufferImage>(display_device, imgSize,
-	VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT, display_host_mem);
+							 VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT,format, display_host_mem);
 
     renderCopyImage->map();
     displaySrcImage->map();
@@ -888,7 +919,7 @@ void PrimusSwapchain::initImages(){
 			   VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
     cmd.end();
     Fence f{display_device};
-    cmd.submit(display_queue, f.fence, {});
+    cmd.submit(display_queue, f.fence);
     f.await();
   }
 }
@@ -964,7 +995,7 @@ void PrimusSwapchain::createCommandBuffers(){
   }
 }
 
-void PrimusSwapchain::storeImage(uint32_t index, VkDevice device, VkExtent2D imgSize, VkQueue queue, VkFormat colorFormat, std::vector<VkSemaphore> wait_on, Fence &notify){
+void PrimusSwapchain::storeImage(uint32_t index, VkQueue queue, std::vector<VkSemaphore> wait_on, Fence &notify){
   render_copy_commands[index]->submit(queue, notify.fence, wait_on);
 }
 
@@ -998,7 +1029,7 @@ void PrimusSwapchain::copyImageData(uint32_t index, std::vector<VkSemaphore> sem
   }
   {
     std::unique_lock<std::mutex> lock(queueMutex);
-    display_commands[index]->submit(display_queue, VK_NULL_HANDLE, sems);
+    display_commands[index]->submit(display_queue, VK_NULL_HANDLE, {}, sems);
   }
 }
 
@@ -1006,7 +1037,7 @@ void PrimusSwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
   std::unique_lock<std::mutex> lock(queueMutex);
 
   auto workItem = QueueItem{queue, *pPresentInfo, pPresentInfo->pImageIndices[0], std::unique_ptr<Fence>{new Fence{device}}};
-  storeImage(workItem.imgIndex, device, imgSize, render_queue, VK_FORMAT_B8G8R8A8_UNORM, std::vector<VkSemaphore>{pPresentInfo->pWaitSemaphores, pPresentInfo->pWaitSemaphores + pPresentInfo->waitSemaphoreCount}, *workItem.fence);
+  storeImage(workItem.imgIndex, render_queue, std::vector<VkSemaphore>{pPresentInfo->pWaitSemaphores, pPresentInfo->pWaitSemaphores + pPresentInfo->waitSemaphoreCount}, *workItem.fence);
 
   work.push_back(std::move(workItem));
   has_work.notify_all();
@@ -1023,18 +1054,16 @@ void PrimusSwapchain::stop(){
   }
 }
 void PrimusSwapchain::present(const QueueItem &workItem){
-    std::unique_ptr<Semaphore> sem(new Semaphore(display_device));
     workItem.fence->await();
     const auto index = workItem.imgIndex;
-
-    copyImageData(index, {sem->sem});
+    copyImageData(index, {images[workItem.imgIndex].display_semaphore.sem});
 
     TRACE_PROFILING_EVENT(index, "copy queued");
 
     VkPresentInfoKHR p2 = {.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     p2.pSwapchains = &backend;
     p2.swapchainCount = 1;
-    p2.pWaitSemaphores = &sem->sem;
+    p2.pWaitSemaphores = &images[workItem.imgIndex].display_semaphore.sem;
     p2.waitSemaphoreCount = 1;
     p2.pImageIndices = &index;
 
