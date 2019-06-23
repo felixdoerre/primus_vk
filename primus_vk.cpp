@@ -80,7 +80,7 @@ std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 #define TRACE_FRAME(x)
 // #define TRACE_FRAME(x) std::cout << "PrimusVK: " << x << "\n";
 
-#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("Error %d in %d\n", r, __LINE__);}}while(0);
+#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("PrimusVK: Error %d in line %d.\n", r, __LINE__);}}while(0);
 // #define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
 
 
@@ -393,8 +393,11 @@ struct ImageWorker {
 
   std::shared_ptr<CommandBuffer> render_copy_command;
   std::shared_ptr<CommandBuffer> display_command;
+  std::unique_ptr<Fence> display_command_fence;
 
   ImageWorker(PrimusSwapchain &swapchain, VkImage display_image, const VkSwapchainCreateInfoKHR &createInfo, std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types);
+  ImageWorker(ImageWorker &&other) = default;
+  ~ImageWorker();
   void initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types, const VkSwapchainCreateInfoKHR &createInfo);
   void createCommandBuffers();
   void copyImageData(std::vector<VkSemaphore> sems);
@@ -471,6 +474,11 @@ struct PrimusSwapchain{
 ImageWorker::ImageWorker(PrimusSwapchain &swapchain, VkImage display_image, const VkSwapchainCreateInfoKHR &createInfo, std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types): swapchain(swapchain), render_copy_fence(swapchain.device), display_semaphore(swapchain.display_device), display_image(display_image){
   initImages(image_memory_types, createInfo);
   createCommandBuffers();
+}
+ImageWorker::~ImageWorker(){
+  if(display_command_fence){
+    display_command_fence->await();
+  }
 }
 
 bool list_all_gpus = false;
@@ -1038,7 +1046,13 @@ void ImageWorker::copyImageData(std::vector<VkSemaphore> sems){
   }
   {
     std::unique_lock<std::mutex> lock(swapchain.queueMutex);
-    display_command->submit(swapchain.display_queue, VK_NULL_HANDLE, {}, sems);
+    if(display_command_fence){
+      display_command_fence->await();
+      display_command_fence->reset();
+    }else{
+      display_command_fence = std::unique_ptr<Fence>(new Fence(swapchain.display_device));
+    }
+    display_command->submit(swapchain.display_queue, display_command_fence->fence, {}, sems);
   }
 }
 
