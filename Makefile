@@ -31,11 +31,8 @@ primus_vk_diag: primus_vk_diag.o
 	g++ -g3 -o $@ $^ -lX11 -lvulkan -ldl
 
 install:
-	$(INSTALL) "libnv_vulkan_wrapper.so" \
-		"$(libdir)/libnv_vulkan_wrapper.so"
-	$(INSTALL) "libprimus_vk.so" "$(libdir)/libprimus_vk.so"
-	$(INSTALL) -m644 "primus_vk.json" \
-		"$(datadir)/vulkan/implicit_layer.d/primus_vk.json"
-	$(INSTALL) -Dm644 "nv_vulkan_wrapper.json" \
-		"$(datadir)/vulkan/icd.d/nv_vulkan_wrapper.json"
+	$(INSTALL) "libnv_vulkan_wrapper.so" -t "$(libdir)/"
+	$(INSTALL) "libprimus_vk.so"  -t "$(libdir)/"
+	$(INSTALL) -m644 "primus_vk.json" -t "$(datadir)/vulkan/implicit_layer.d/"
+	$(INSTALL) -m644 "nv_vulkan_wrapper.json" -t "$(datadir)/vulkan/icd.d/"
 	$(INSTALL) -m755 "pvkrun.in.sh" "$(bindir)/pvkrun"
