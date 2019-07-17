@@ -144,7 +144,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     const VkAllocationCallbacks*                pAllocator,
     VkInstance*                                 pInstance)
 {
-  TRACE("CreateInstance");
   VkLayerInstanceCreateInfo *layerCreateInfo = (VkLayerInstanceCreateInfo *)pCreateInfo->pNext;
 
   // step through the chain of pNext until we get to the link info
@@ -200,7 +199,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   for(auto &dev: physicalDevices){
     VkPhysicalDeviceProperties props;
     dispatchTable.GetPhysicalDeviceProperties(dev, &props);
-    TRACE(GetKey(dev) << ": ");
+    TRACE(dev << ": ");
     if(IsDevice(props, displayVendorID, displayDeviceID, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)){
       display = dev;
       break;
@@ -212,7 +211,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   for(auto &dev: physicalDevices){
     VkPhysicalDeviceProperties props;
     dispatchTable.GetPhysicalDeviceProperties(dev, &props);
-    TRACE(GetKey(dev) << ": ");
+    TRACE(dev << ".");
     if(IsDevice(props, renderVendorID, renderDeviceID)){
       render = dev;
       break;
@@ -499,12 +498,10 @@ public:
     auto &minstance_info = instance_info[GetKey(render_dev)];
 
     VkDevice pDeviceLogic;
-    TRACE("Thread running");
-    TRACE("getting rendering suff: " << GetKey(display_dev));
+    TRACE("Device creation thread running");
     uint32_t gpuCount;
     list_all_gpus = true;
     loader_dispatch.EnumeratePhysicalDevices(minstance_info.instance, &gpuCount, nullptr);
-    TRACE("Gpus: " << gpuCount);
     std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
     loader_dispatch.EnumeratePhysicalDevices(minstance_info.instance, &gpuCount, physicalDevices.data());
     list_all_gpus = false;
@@ -761,7 +758,6 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
 #define FETCH(x) dispatchTable.x = (PFN_vk##x)gdpa(*pDevice, "vk" #x);
 #define _FETCH(x) dispatchTable.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
   FETCH(GetDeviceProcAddr);
-  TRACE("GetDeviceProcAddr is: " << (void*) dispatchTable.GetDeviceProcAddr);
   FETCH(DestroyDevice);
   FETCH(BeginCommandBuffer);
   FETCH(CmdDraw);
@@ -769,7 +765,6 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(EndCommandBuffer);
 
   FETCH(CreateSwapchainKHR);
-  TRACE("Create Swapchain KHR is: " << (void*) dispatchTable.CreateSwapchainKHR);
   FETCH(DestroySwapchainKHR);
   FETCH(GetSwapchainImagesKHR);
   FETCH(AcquireNextImageKHR);
@@ -798,6 +793,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   //FETCH(GetPhysicalDeviceMemoryProperties);
   //FETCH(GetPhysicalDeviceQueueFamilyProperties);
   _FETCH(QueueSubmit);
+  FETCH(DeviceWaitIdle);
 
   _FETCH(GetDeviceQueue);
 
@@ -848,7 +844,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   TRACE("MinImageCount: " << pCreateInfo->minImageCount);
   TRACE("fetching device for: " << GetKey(render_gpu));
   VkDevice display_gpu = my_instance.cod->display_gpu;
-  TRACE("found: " << GetKey(display_gpu));
 
   TRACE("FamilyIndexCount: " <<  pCreateInfo->queueFamilyIndexCount);
   TRACE("Dev: " << GetKey(display_gpu));
@@ -883,8 +878,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice devi
   *pSwapchainImageCount = ch->images.size();
   VkResult res = VK_SUCCESS;
   if(pSwapchainImages != nullptr) {
-    TRACE("Get Swapchain Images buffer: " <<  pSwapchainImages);
-    res = VK_SUCCESS; //device_dispatch[GetKey(device)].GetSwapchainImagesKHR(device, ch->backend, pSwapchainImageCount, pSwapchainImages);
+    res = VK_SUCCESS;
     for(size_t i = 0; i < *pSwapchainImageCount; i++){
       pSwapchainImages[i] = ch->images[i].render_image->img;
     }
@@ -1147,6 +1141,12 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(
   instance_dispatch[GetKey(phy)].GetPhysicalDeviceQueueFamilyProperties(phy, pQueueFamilyPropertyCount, pQueueFamilyProperties);
 }
 
+VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DeviceWaitIdle(VkDevice device){
+  auto &my_instance = *device_instance_info[GetKey(device)];
+  device_dispatch[GetKey(device)].DeviceWaitIdle(device);
+  device_dispatch[GetKey(my_instance.cod->display_gpu)].DeviceWaitIdle(my_instance.cod->display_gpu);
+}
+
 #include "primus_vk_forwarding_prototypes.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -1270,6 +1270,7 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetDeviceProcAddr(VkDevic
   GETPROCADDR(GetSwapchainImagesKHR);
   GETPROCADDR(AcquireNextImageKHR);
   GETPROCADDR(QueuePresentKHR);
+  GETPROCADDR(DeviceWaitIdle);
 #define FORWARD(func) GETPROCADDR(func)
 #include "primus_vk_forwarding.h"
 #undef FORWARD
