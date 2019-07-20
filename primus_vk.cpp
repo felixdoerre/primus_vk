@@ -57,6 +57,7 @@ struct InstanceInfo {
   CreateOtherDevice *cod;
 
   bool secondarySpawned;
+  std::shared_ptr<std::mutex> renderQueueMutex;
 };
 
 std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
@@ -249,7 +250,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     scoped_lock l(global_lock);
 
     instance_dispatch[GetKey(*pInstance)] = dispatchTable;
-    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .cod=nullptr, .secondarySpawned = false};
+    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .cod=nullptr, .secondarySpawned = false, .renderQueueMutex = std::make_shared<std::mutex>()};
   }
 
   return VK_SUCCESS;
@@ -792,8 +793,9 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(FreeCommandBuffers);
   //FETCH(GetPhysicalDeviceMemoryProperties);
   //FETCH(GetPhysicalDeviceQueueFamilyProperties);
-  _FETCH(QueueSubmit);
+  FETCH(QueueSubmit);
   FETCH(DeviceWaitIdle);
+  FETCH(QueueWaitIdle);
 
   _FETCH(GetDeviceQueue);
 
@@ -906,6 +908,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device
   qsi.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   qsi.signalSemaphoreCount = 1;
   qsi.pSignalSemaphores = &semaphore;
+  scoped_lock lock(*device_instance_info[GetKey(ch->render_queue)]->renderQueueMutex);
   device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, fence);
   TRACE_PROFILING_EVENT(*pImageIndex, "Acquire done");
 
@@ -1112,7 +1115,15 @@ void PrimusSwapchain::run(){
   }
 }
 
+VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueueSubmit(VkQueue queue, uint32_t submitCount,
+							 const VkSubmitInfo* pSubmits,
+							 VkFence fence) {
+  scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
+  return device_dispatch[GetKey(queue)].QueueSubmit(queue, submitCount, pSubmits, fence);
+}
+
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
+  scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
   const auto start = std::chrono::steady_clock::now();
   if(pPresentInfo->swapchainCount != 1){
     TRACE("Warning, presenting with multiple swapchains not implemented, ignoring");
@@ -1139,6 +1150,11 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateXcbSurfaceKHR(VkInstance inst
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physicalDevice, uint32_t* pQueueFamilyPropertyCount, VkQueueFamilyProperties* pQueueFamilyProperties) {
   VkPhysicalDevice phy = physicalDevice;
   instance_dispatch[GetKey(phy)].GetPhysicalDeviceQueueFamilyProperties(phy, pQueueFamilyPropertyCount, pQueueFamilyProperties);
+}
+
+VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_QueueWaitIdle(VkQueue queue){
+  scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
+  device_dispatch[GetKey(queue)].QueueWaitIdle(queue);
 }
 
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DeviceWaitIdle(VkDevice device){
@@ -1270,7 +1286,9 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetDeviceProcAddr(VkDevic
   GETPROCADDR(GetSwapchainImagesKHR);
   GETPROCADDR(AcquireNextImageKHR);
   GETPROCADDR(QueuePresentKHR);
+  GETPROCADDR(QueueSubmit);
   GETPROCADDR(DeviceWaitIdle);
+  GETPROCADDR(QueueWaitIdle);
 #define FORWARD(func) GETPROCADDR(func)
 #include "primus_vk_forwarding.h"
 #undef FORWARD
@@ -1306,6 +1324,9 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
   GETPROCADDR(GetSwapchainImagesKHR);
   GETPROCADDR(AcquireNextImageKHR);
   GETPROCADDR(QueuePresentKHR);
+  GETPROCADDR(QueueSubmit);
+  GETPROCADDR(DeviceWaitIdle);
+  GETPROCADDR(QueueWaitIdle);
   GETPROCADDR(GetPhysicalDeviceQueueFamilyProperties);
 
 #define FORWARD(func) GETPROCADDR(func)
