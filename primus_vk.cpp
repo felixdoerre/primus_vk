@@ -936,7 +936,7 @@ std::tuple<ssize_t, ssize_t, ssize_t> PrimusSwapchain::getImageMemories(){
   }
   TRACE("Selected render mem: " << render_host_mem << ";" << render_local_mem << " display: " << display_host_mem);
 
-  return {render_local_mem, render_host_mem, display_host_mem};
+  return std::make_tuple(render_local_mem, render_host_mem, display_host_mem);
 }
 
 void ImageWorker::createCommandBuffers(){
