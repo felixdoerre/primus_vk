@@ -28,6 +28,7 @@
 #include <sstream>
 #include <string>
 #include <chrono>
+#include <functional>
 
 #undef VK_LAYER_EXPORT
 #if defined(WIN32)
@@ -53,6 +54,9 @@ struct InstanceInfo {
   VkInstance instance;
   VkPhysicalDevice render;
   VkPhysicalDevice display;
+  PFN_vkGetInstanceProcAddr gipa;
+  PFN_vkLayerCreateDevice layerCreateDevice;
+  PFN_vkLayerDestroyDevice layerDestroyDevice;
 
   CreateOtherDevice *cod;
 
@@ -140,29 +144,41 @@ bool IsDevice(
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Layer init and shutdown
 VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice);
+VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkInstance instance, const char *pName);
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     const VkInstanceCreateInfo*                 pCreateInfo,
     const VkAllocationCallbacks*                pAllocator,
     VkInstance*                                 pInstance)
 {
+  VkLayerInstanceCreateInfo *layer_link_info = nullptr;
+  PFN_vkLayerCreateDevice layerCreateDevice = nullptr;
+  PFN_vkLayerDestroyDevice layerDestroyDevice = nullptr;
   VkLayerInstanceCreateInfo *layerCreateInfo = (VkLayerInstanceCreateInfo *)pCreateInfo->pNext;
 
   // step through the chain of pNext until we get to the link info
-  while(layerCreateInfo && (layerCreateInfo->sType != VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO ||
-                            layerCreateInfo->function != VK_LAYER_LINK_INFO))
+  while(layerCreateInfo)
   {
+    if ( layerCreateInfo->sType == VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO &&  layerCreateInfo->function == VK_LAYER_LINK_INFO) {
+      layer_link_info = layerCreateInfo;
+    }
+    if ( layerCreateInfo->sType == VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO &&  layerCreateInfo->function == VK_LOADER_LAYER_CREATE_DEVICE_CALLBACK) {
+      if(getenv("PRIMUS_VK_OLD_API") == nullptr){
+	layerCreateDevice = layerCreateInfo->u.layerDevice.pfnLayerCreateDevice;
+	layerDestroyDevice = layerCreateInfo->u.layerDevice.pfnLayerDestroyDevice;
+      }
+    }
     layerCreateInfo = (VkLayerInstanceCreateInfo *)layerCreateInfo->pNext;
   }
 
-  if(layerCreateInfo == NULL)
+  if(layer_link_info == nullptr)
   {
     // No loader instance create info
     return VK_ERROR_INITIALIZATION_FAILED;
   }
 
-  PFN_vkGetInstanceProcAddr gpa = layerCreateInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
+  PFN_vkGetInstanceProcAddr gpa = layer_link_info->u.pLayerInfo->pfnNextGetInstanceProcAddr;
   // move chain on for next layer
-  layerCreateInfo->u.pLayerInfo = layerCreateInfo->u.pLayerInfo->pNext;
+  layer_link_info->u.pLayerInfo = layer_link_info->u.pLayerInfo->pNext;
 
   PFN_vkCreateInstance createFunc = (PFN_vkCreateInstance)gpa(VK_NULL_HANDLE, "vkCreateInstance");
 
@@ -188,7 +204,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   std::vector<VkPhysicalDevice> physicalDevices;
   {
     auto enumerateDevices = dispatchTable.EnumeratePhysicalDevices;
-    TRACE("Getting devices");
     uint32_t gpuCount = 0;
     enumerateDevices(*pInstance, &gpuCount, nullptr);
     physicalDevices.resize(gpuCount);
@@ -234,23 +249,29 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     return VK_ERROR_INITIALIZATION_FAILED;
   }
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
+  FORWARD(GetPhysicalDeviceMemoryProperties);
   FORWARD(GetPhysicalDeviceQueueFamilyProperties);
 #include "primus_vk_forwarding.h"
 #undef FORWARD
 
+  if(layerCreateDevice == nullptr) {
+    TRACE("Linking to libvulkan.so.1 as fallback");
 #define _FORWARD(x) loader_dispatch.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
   _FORWARD(CreateDevice);
   _FORWARD(EnumeratePhysicalDevices);
   _FORWARD(GetPhysicalDeviceMemoryProperties);
   _FORWARD(GetPhysicalDeviceQueueFamilyProperties);
 #undef _FORWARD
+  } else {
+    libvulkan.reset();
+  }
 
   // store the table by key
   {
     scoped_lock l(global_lock);
 
     instance_dispatch[GetKey(*pInstance)] = dispatchTable;
-    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .cod=nullptr, .secondarySpawned = false, .renderQueueMutex = std::make_shared<std::mutex>()};
+    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .gipa=gpa, .layerCreateDevice=layerCreateDevice, .layerDestroyDevice=layerDestroyDevice, .cod=nullptr, .secondarySpawned = false, .renderQueueMutex = std::make_shared<std::mutex>()};
   }
 
   return VK_SUCCESS;
@@ -495,10 +516,39 @@ public:
   CreateOtherDevice(VkPhysicalDevice display_dev, VkPhysicalDevice render_dev, VkDevice render_gpu):
     display_dev(display_dev), render_dev(render_dev), render_gpu(render_gpu){
   }
+  void finish(std::function<VkResult(VkDeviceCreateInfo &createInfo, VkDevice &dev)> creator){
+    auto &minstance_info = instance_info[GetKey(render_dev)];
+    auto &minstance_dispatch = instance_dispatch[GetKey(minstance_info.instance)];
+    minstance_dispatch.GetPhysicalDeviceMemoryProperties(display_dev, &display_mem);
+    minstance_dispatch.GetPhysicalDeviceMemoryProperties(render_dev, &render_mem);
+
+    createDisplayDev(creator);
+  }
+  void createDisplayDev(std::function<VkResult(VkDeviceCreateInfo &createInfo, VkDevice &dev)> creator){
+    VkDeviceCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+    VkDeviceQueueCreateInfo queueInfo{};
+    queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueInfo.queueFamilyIndex = 0;
+    queueInfo.queueCount = 1;
+    const float defaultQueuePriority(0.0f);
+    queueInfo.pQueuePriorities = &defaultQueuePriority;
+
+    createInfo.queueCreateInfoCount = 1;
+    createInfo.pQueueCreateInfos = &queueInfo;
+    createInfo.enabledExtensionCount = 1;
+    const char *swap[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    createInfo.ppEnabledExtensionNames = swap;
+    VkResult ret = creator(createInfo, display_gpu);
+    TRACE("Creating display device finished!: " << ret);
+    if(ret != VK_SUCCESS){
+      throw std::runtime_error("Display device creation failed");
+    }
+  }
   void run(){
     auto &minstance_info = instance_info[GetKey(render_dev)];
 
-    VkDevice pDeviceLogic;
     TRACE("Device creation thread running");
     uint32_t gpuCount;
     list_all_gpus = true;
@@ -515,7 +565,7 @@ public:
 
     std::vector<VkQueueFamilyProperties> queueFamilyProperties;
     if(true){
-      PFN_vkGetPhysicalDeviceQueueFamilyProperties getQueues = loader_dispatch.GetPhysicalDeviceQueueFamilyProperties;
+      auto getQueues = loader_dispatch.GetPhysicalDeviceQueueFamilyProperties;
       uint32_t queueFamilyCount;
       getQueues(display_dev, &queueFamilyCount, nullptr);
       assert(queueFamilyCount > 0);
@@ -526,27 +576,10 @@ public:
 	TRACE(" flags: " << props.queueFlags);
       }
     }
-    VkDeviceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 
-    VkDeviceQueueCreateInfo queueInfo{};
-    queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueInfo.queueFamilyIndex = 0;
-    queueInfo.queueCount = 1;
-    const float defaultQueuePriority(0.0f);
-    queueInfo.pQueuePriorities = &defaultQueuePriority;
-
-    createInfo.queueCreateInfoCount = 1;
-    createInfo.pQueueCreateInfos = &queueInfo;
-    createInfo.enabledExtensionCount = 1;
-    const char *swap[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    createInfo.ppEnabledExtensionNames = swap;
-    VkResult ret = loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &pDeviceLogic);
-    TRACE("Create Graphics FINISHED!: " << ret);
-    TRACE("Display: " << GetKey(pDeviceLogic));
-    TRACE("storing as reference to: " << GetKey(render_gpu));
-    display_gpu = pDeviceLogic;
-
+    createDisplayDev([this](VkDeviceCreateInfo &createInfo, VkDevice &dev){
+      return loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &dev);
+    });
   }
 
   void start(){
@@ -642,7 +675,7 @@ public:
     submitInfo.pSignalSemaphores = signal.data();
 
     // Submit to the queue
-    VK_CHECK_RESULT(device_dispatch[GetKey(queue)].QueueSubmit(queue, 1, &submitInfo, fence));
+    VK_CHECK_RESULT(device_dispatch[GetKey(device)].QueueSubmit(queue, 1, &submitInfo, fence));
   }
 };
 
@@ -690,14 +723,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
     VkDevice*                                   pDevice)
 {
   auto &my_instance_info = instance_info[GetKey(physicalDevice)];
-  TRACE("in function: creating device");
-  {
-    auto info = pCreateInfo;
-    while(info != nullptr){
-      TRACE("Extension: " << info->sType);
-      info = (VkDeviceCreateInfo *) info->pNext;
-    }
-  }
   VkLayerDeviceCreateInfo *layerCreateInfo = (VkLayerDeviceCreateInfo *)pCreateInfo->pNext;
 
   // step through the chain of pNext until we get to the link info
@@ -724,19 +749,31 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
   {
-    static bool first = true;
     if(!my_instance_info.secondarySpawned){
-      scoped_lock l(global_lock);
       my_instance_info.secondarySpawned = true;
       TRACE("spawning secondary device creation: " << &my_instance_info);
-      // hopefully the first createFunc has only modified this one field
-      layerCreateInfo->u.pLayerInfo = targetLayerInfo;
-      TRACE("After reset:" << layerCreateInfo->u.pLayerInfo);
       auto display_dev = my_instance_info.display;
-
-      my_instance_info.cod = new CreateOtherDevice{display_dev, physicalDevice, *pDevice};
-      my_instance_info.cod->start();
-      pthread_yield();
+      
+      {
+	scoped_lock l(global_lock);
+	my_instance_info.cod = new CreateOtherDevice{display_dev, physicalDevice, *pDevice};
+      }
+      if(my_instance_info.layerCreateDevice != nullptr){
+	auto createDevice = my_instance_info.layerCreateDevice;
+	my_instance_info.cod->finish([createDevice,&my_instance_info](VkDeviceCreateInfo &createInfo, VkDevice &dev){
+	  PFN_vkGetDeviceProcAddr gdpa = nullptr;
+	  auto ret = createDevice(my_instance_info.instance, my_instance_info.display, &createInfo, nullptr, &dev, PrimusVK_GetInstanceProcAddr, &gdpa);
+	  {
+	    scoped_lock l(global_lock);
+	    device_instance_info[GetKey(dev)] = &my_instance_info;
+	    device_dispatch[GetKey(dev)] = fetchDispatchTable(gdpa, &dev);
+	  }
+	  return ret;
+	});
+      }else{
+	my_instance_info.cod->start();
+	pthread_yield();
+      }
     }
   }
 
@@ -782,7 +819,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(UnmapMemory);
 
 
-  _FETCH(AllocateCommandBuffers);
+  /*_*/FETCH(AllocateCommandBuffers);
   FETCH(BeginCommandBuffer);
   FETCH(CmdCopyImage);
   FETCH(CmdPipelineBarrier);
@@ -797,7 +834,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(DeviceWaitIdle);
   FETCH(QueueWaitIdle);
 
-  _FETCH(GetDeviceQueue);
+  /*_*/FETCH(GetDeviceQueue);
 
   FETCH(CreateFence);
   FETCH(WaitForFences);
@@ -814,7 +851,12 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
 VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const VkAllocationCallbacks* pAllocator)
 {
   scoped_lock l(global_lock);
+  auto &my_instance = *device_instance_info[GetKey(device)];
+  device_dispatch[GetKey(device)].DestroyDevice(device, pAllocator);
+  auto &display_device = my_instance.cod->display_gpu;
+  my_instance.layerDestroyDevice(display_device, nullptr, device_dispatch[GetKey(display_device)].DestroyDevice);
   device_dispatch.erase(GetKey(device));
+  device_dispatch.erase(GetKey(display_device));
 }
 
 VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
@@ -1092,9 +1134,9 @@ void PrimusSwapchain::present(const QueueItem &workItem){
       std::unique_lock<std::mutex> lock(queueMutex);
       has_work.wait(lock, [this,&workItem](){return &workItem == &in_progress.front();});
       TRACE_PROFILING_EVENT(index, "submitting");
-      VkResult res = device_dispatch[GetKey(display_queue)].QueuePresentKHR(display_queue, &p2);
+      VkResult res = device_dispatch[GetKey(display_device)].QueuePresentKHR(display_queue, &p2);
       if(res != VK_SUCCESS) {
-	TRACE("ERROR, Queue Present failed\n");
+	TRACE("ERROR, Queue Present failed: " << res << "\n");
       }
       in_progress.pop_front();
       has_work.notify_all();
