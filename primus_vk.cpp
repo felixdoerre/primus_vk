@@ -50,18 +50,145 @@ void *&GetKey(DispatchableType inst)
 
 class CreateOtherDevice;
 
+// #define TRACE(x)
+#define TRACE(x) std::cout << "PrimusVK: " << x << "\n";
+#define TRACE_PROFILING(x)
+// #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
+#define TRACE_PROFILING_EVENT(x, y)
+// #define TRACE_PROFILING_EVENT(idx, evt) std::cout << "PrimusVK-profiling: " << idx << " " << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - primus_start).count() << " " << evt << "\n";
+#define TRACE_FRAME(x)
+// #define TRACE_FRAME(x) std::cout << "PrimusVK: " << x << "\n";
+
+#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("PrimusVK: Error %d in line %d.\n", r, __LINE__);}}while(0);
+// #define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
+
 struct InstanceInfo {
+public:
   VkInstance instance;
-  VkPhysicalDevice render;
-  VkPhysicalDevice display;
-  PFN_vkGetInstanceProcAddr gipa;
   PFN_vkLayerCreateDevice layerCreateDevice;
   PFN_vkLayerDestroyDevice layerDestroyDevice;
 
-  CreateOtherDevice *cod;
+  VkPhysicalDevice render = VK_NULL_HANDLE;
+  VkPhysicalDevice display = VK_NULL_HANDLE;
+  CreateOtherDevice *cod = nullptr;
 
-  bool secondarySpawned;
-  std::shared_ptr<std::mutex> renderQueueMutex;
+  bool secondarySpawned = false;
+  std::shared_ptr<std::mutex> renderQueueMutex = std::make_shared<std::mutex>();
+  InstanceInfo() = default;
+  InstanceInfo(const InstanceInfo &) = delete;
+  InstanceInfo(InstanceInfo &&) = default;
+  InstanceInfo(VkInstance instance,
+	       PFN_vkLayerCreateDevice layerCreateDevice,
+	       PFN_vkLayerDestroyDevice layerDestroyDevice) : instance(instance), layerCreateDevice(layerCreateDevice), layerDestroyDevice(layerDestroyDevice) {
+  }
+  InstanceInfo &operator=(InstanceInfo &&) = default;
+private:
+  void GetEnvVendorDeviceIDs(std::string env, uint32_t &vendor, uint32_t &device) {
+    char *envstr = getenv(env.c_str());
+    if(envstr != nullptr){
+      std::stringstream ss(envstr);
+      std::string item;
+      std::vector<uint32_t> hexnums(2);
+      int i = 0;
+      while(std::getline(ss, item, ':') && (i < 2)) {
+	uint32_t num = 0;
+	std::stringstream _ss;
+	_ss << std::hex << item;
+	_ss >> num;
+	hexnums[i] = num;
+	++i;
+      }
+      vendor = hexnums[0];
+      device = hexnums[1];
+    }
+  }
+
+  bool IsDevice(
+		VkPhysicalDeviceProperties props, 
+		uint32_t vendor, 
+		uint32_t device, 
+		VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+    if((vendor == 0) && (props.deviceType == type)){
+      if(type == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
+	TRACE("Got integrated gpu!");
+      } else {
+	TRACE("Got discrete gpu!");
+      }
+      TRACE("Device: " << props.deviceName);
+      TRACE("  Type: " << props.deviceType);
+      return true;
+    }
+    if((props.vendorID == vendor) && (props.deviceID == device)){
+      TRACE("Got device from env!");
+      TRACE("Device: " << props.deviceName);
+      TRACE("  Type: " << props.deviceType);
+      return true;
+    }
+    if(props.vendorID == vendor){
+      TRACE("Got device from env! (via vendorID)");
+      TRACE("Device: " << props.deviceName);
+      TRACE("  Type: " << props.deviceType);
+      return true;
+    }
+    return false;
+  }
+
+public:
+  VkResult searchDevices(VkLayerInstanceDispatchTable &dispatchTable){
+    uint32_t displayVendorID = 0;
+    uint32_t displayDeviceID = 0;
+    uint32_t renderVendorID = 0;
+    uint32_t renderDeviceID = 0;
+    GetEnvVendorDeviceIDs("PRIMUS_VK_DISPLAYID", displayVendorID, displayDeviceID);
+    GetEnvVendorDeviceIDs("PRIMUS_VK_RENDERID", renderVendorID, renderDeviceID);
+
+    std::vector<VkPhysicalDevice> physicalDevices;
+    {
+      auto enumerateDevices = dispatchTable.EnumeratePhysicalDevices;
+      uint32_t gpuCount = 0;
+      enumerateDevices(instance, &gpuCount, nullptr);
+      physicalDevices.resize(gpuCount);
+      enumerateDevices(instance, &gpuCount, physicalDevices.data());
+    }
+
+    TRACE("Searching for display GPU:");
+    for(auto &dev: physicalDevices){
+      VkPhysicalDeviceProperties props;
+      dispatchTable.GetPhysicalDeviceProperties(dev, &props);
+      TRACE(dev << ": ");
+      if(IsDevice(props, displayVendorID, displayDeviceID, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)){
+	display = dev;
+	break;
+      }
+    }
+
+    TRACE("Searching for render GPU:");
+    for(auto &dev: physicalDevices){
+      VkPhysicalDeviceProperties props;
+      dispatchTable.GetPhysicalDeviceProperties(dev, &props);
+      TRACE(dev << ".");
+      if(IsDevice(props, renderVendorID, renderDeviceID)){
+	render = dev;
+	break;
+      }
+    }
+    if(display == VK_NULL_HANDLE || render == VK_NULL_HANDLE){
+      const auto c_icd_filenames = getenv("VK_ICD_FILENAMES");
+      if(display == VK_NULL_HANDLE) {
+	TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?");
+      }
+      if(render == VK_NULL_HANDLE) {
+	TRACE("No device for the rendering GPU found. Is the correct driver installed?");
+      }
+      if(c_icd_filenames != nullptr) {
+	TRACE("VK_ICD_FILENAMES=" << c_icd_filenames);
+      } else {
+	TRACE("VK_ICD_FILENAMES not set");
+      }
+      return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    return VK_SUCCESS;
+  }
 };
 
 std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
@@ -75,71 +202,6 @@ std::map<void *, VkLayerDispatchTable> device_dispatch;
 
 std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 
-
-// #define TRACE(x)
-#define TRACE(x) std::cout << "PrimusVK: " << x << "\n";
-#define TRACE_PROFILING(x)
-// #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
-#define TRACE_PROFILING_EVENT(x, y)
-// #define TRACE_PROFILING_EVENT(idx, evt) std::cout << "PrimusVK-profiling: " << idx << " " << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - primus_start).count() << " " << evt << "\n";
-#define TRACE_FRAME(x)
-// #define TRACE_FRAME(x) std::cout << "PrimusVK: " << x << "\n";
-
-#define VK_CHECK_RESULT(x) do{ const VkResult r = x; if(r != VK_SUCCESS){printf("PrimusVK: Error %d in line %d.\n", r, __LINE__);}}while(0);
-// #define VK_CHECK_RESULT(x) if(x != VK_SUCCESS){printf("Error %d, in %d\n", x, __LINE__);}
-
-
-void GetEnvVendorDeviceIDs(std::string env, uint32_t &vendor, uint32_t &device)
-{
-  char *envstr = getenv(env.c_str());
-  if(envstr != nullptr){
-    std::stringstream ss(envstr);
-    std::string item;
-    std::vector<uint32_t> hexnums(2);
-    int i = 0;
-    while(std::getline(ss, item, ':') && (i < 2)) {
-      uint32_t num = 0;
-      std::stringstream _ss;
-      _ss << std::hex << item;
-      _ss >> num;
-      hexnums[i] = num;
-      ++i;
-    }
-    vendor = hexnums[0];
-    device = hexnums[1];
-  }
-}
-
-bool IsDevice(
-  VkPhysicalDeviceProperties props, 
-  uint32_t vendor, 
-  uint32_t device, 
-  VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-{
-  if((vendor == 0) && (props.deviceType == type)){
-    if(type == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
-      TRACE("Got integrated gpu!");
-    } else {
-      TRACE("Got discrete gpu!");
-    }
-    TRACE("Device: " << props.deviceName);
-    TRACE("  Type: " << props.deviceType);
-    return true;
-  }
-  if((props.vendorID == vendor) && (props.deviceID == device)){
-    TRACE("Got device from env!");
-    TRACE("Device: " << props.deviceName);
-    TRACE("  Type: " << props.deviceType);
-    return true;
-  }
-  if(props.vendorID == vendor){
-    TRACE("Got device from env! (via vendorID)");
-    TRACE("Device: " << props.deviceName);
-    TRACE("  Type: " << props.deviceType);
-    return true;
-  }
-  return false;
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Layer init and shutdown
@@ -155,9 +217,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   PFN_vkLayerDestroyDevice layerDestroyDevice = nullptr;
   VkLayerInstanceCreateInfo *layerCreateInfo = (VkLayerInstanceCreateInfo *)pCreateInfo->pNext;
 
-  // step through the chain of pNext until we get to the link info
-  while(layerCreateInfo)
-  {
+  while(layerCreateInfo) {
     if ( layerCreateInfo->sType == VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO &&  layerCreateInfo->function == VK_LAYER_LINK_INFO) {
       layer_link_info = layerCreateInfo;
     }
@@ -170,18 +230,14 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     layerCreateInfo = (VkLayerInstanceCreateInfo *)layerCreateInfo->pNext;
   }
 
-  if(layer_link_info == nullptr)
-  {
-    // No loader instance create info
+  if(layer_link_info == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
 
   PFN_vkGetInstanceProcAddr gpa = layer_link_info->u.pLayerInfo->pfnNextGetInstanceProcAddr;
-  // move chain on for next layer
   layer_link_info->u.pLayerInfo = layer_link_info->u.pLayerInfo->pNext;
 
   PFN_vkCreateInstance createFunc = (PFN_vkCreateInstance)gpa(VK_NULL_HANDLE, "vkCreateInstance");
-
   VK_CHECK_RESULT( createFunc(pCreateInfo, pAllocator, pInstance) );
 
   // fetch our own dispatch table for the functions we need, into the next layer
@@ -194,60 +250,9 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   FORWARD(GetPhysicalDeviceProperties);
 #undef FORWARD
 
-  uint32_t displayVendorID = 0;
-  uint32_t displayDeviceID = 0;
-  uint32_t renderVendorID = 0;
-  uint32_t renderDeviceID = 0;
-  GetEnvVendorDeviceIDs("PRIMUS_VK_DISPLAYID", displayVendorID, displayDeviceID);
-  GetEnvVendorDeviceIDs("PRIMUS_VK_RENDERID", renderVendorID, renderDeviceID);
-
-  std::vector<VkPhysicalDevice> physicalDevices;
-  {
-    auto enumerateDevices = dispatchTable.EnumeratePhysicalDevices;
-    uint32_t gpuCount = 0;
-    enumerateDevices(*pInstance, &gpuCount, nullptr);
-    physicalDevices.resize(gpuCount);
-    enumerateDevices(*pInstance, &gpuCount, physicalDevices.data());
-  }
-
-  TRACE("Searching for display GPU:");
-  VkPhysicalDevice display = VK_NULL_HANDLE;
-  for(auto &dev: physicalDevices){
-    VkPhysicalDeviceProperties props;
-    dispatchTable.GetPhysicalDeviceProperties(dev, &props);
-    TRACE(dev << ": ");
-    if(IsDevice(props, displayVendorID, displayDeviceID, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)){
-      display = dev;
-      break;
-    }
-  }
-
-  TRACE("Searching for render GPU:");
-  VkPhysicalDevice render = VK_NULL_HANDLE;
-  for(auto &dev: physicalDevices){
-    VkPhysicalDeviceProperties props;
-    dispatchTable.GetPhysicalDeviceProperties(dev, &props);
-    TRACE(dev << ".");
-    if(IsDevice(props, renderVendorID, renderDeviceID)){
-      render = dev;
-      break;
-    }
-  }
-  if(display == VK_NULL_HANDLE || render == VK_NULL_HANDLE){
-    const auto c_icd_filenames = getenv("VK_ICD_FILENAMES");
-    if(display == VK_NULL_HANDLE) {
-      TRACE("No device for the display GPU found. Are the intel-mesa drivers installed?");
-    }
-    if(render == VK_NULL_HANDLE) {
-      TRACE("No device for the rendering GPU found. Is the correct driver installed?");
-    }
-    if(c_icd_filenames != nullptr) {
-      TRACE("VK_ICD_FILENAMES=" << c_icd_filenames);
-    } else {
-      TRACE("VK_ICD_FILENAMES not set");
-    }
-    return VK_ERROR_INITIALIZATION_FAILED;
-  }
+  auto my_instance_info = InstanceInfo{*pInstance, layerCreateDevice, layerDestroyDevice};
+  auto res = my_instance_info.searchDevices(dispatchTable);
+  if(res != VK_SUCCESS) return res;
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
   FORWARD(GetPhysicalDeviceMemoryProperties);
   FORWARD(GetPhysicalDeviceQueueFamilyProperties);
@@ -271,7 +276,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
     scoped_lock l(global_lock);
 
     instance_dispatch[GetKey(*pInstance)] = dispatchTable;
-    instance_info[GetKey(*pInstance)] = InstanceInfo{.instance = *pInstance, .render = render, .display=display, .gipa=gpa, .layerCreateDevice=layerCreateDevice, .layerDestroyDevice=layerDestroyDevice, .cod=nullptr, .secondarySpawned = false, .renderQueueMutex = std::make_shared<std::mutex>()};
+    instance_info[GetKey(*pInstance)] = std::move(my_instance_info);
   }
 
   return VK_SUCCESS;
@@ -793,8 +798,8 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   TRACE("fetching dispatch for " << GetKey(*pDevice));
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerDispatchTable dispatchTable;
-#define FETCH(x) dispatchTable.x = (PFN_vk##x)gdpa(*pDevice, "vk" #x);
-#define _FETCH(x) dispatchTable.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
+#define FETCH(x) dispatchTable.x = (PFN_vk##x) gdpa(*pDevice, "vk" #x);
+#define _FETCH(x) dispatchTable.x =(PFN_vk##x) (libvulkan?(PFN_vkVoidFunction)dlsym(libvulkan.get(), "vk" #x): gdpa(*pDevice, "vk" #x));
   FETCH(GetDeviceProcAddr);
   FETCH(DestroyDevice);
   FETCH(BeginCommandBuffer);
@@ -819,7 +824,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(UnmapMemory);
 
 
-  /*_*/FETCH(AllocateCommandBuffers);
+  _FETCH(AllocateCommandBuffers);
   FETCH(BeginCommandBuffer);
   FETCH(CmdCopyImage);
   FETCH(CmdPipelineBarrier);
@@ -834,7 +839,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(DeviceWaitIdle);
   FETCH(QueueWaitIdle);
 
-  /*_*/FETCH(GetDeviceQueue);
+  _FETCH(GetDeviceQueue);
 
   FETCH(CreateFence);
   FETCH(WaitForFences);
@@ -1266,7 +1271,6 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
     VkInstance                                  instance,
     uint32_t*                                   pPhysicalDeviceCount,
     VkPhysicalDevice*                           pPhysicalDevices){
-  InstanceInfo &info = instance_info[GetKey(instance)];
   int cnt = 1;
   if(list_all_gpus) cnt = 2;
   if(pPhysicalDevices == nullptr){
@@ -1279,6 +1283,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
   std::vector<VkPhysicalDevice> vec{*pPhysicalDeviceCount};
   res = instance_dispatch[GetKey(instance)].EnumeratePhysicalDevices(instance, pPhysicalDeviceCount, vec.data());
   if(res != VK_SUCCESS) return res;
+  InstanceInfo &info = instance_info[GetKey(instance)];
   pPhysicalDevices[0] = info.render;
   *pPhysicalDeviceCount = cnt;
   if(cnt >= 2){
