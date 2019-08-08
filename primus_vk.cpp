@@ -514,12 +514,15 @@ public:
   VkPhysicalDevice render_dev;
   VkPhysicalDeviceMemoryProperties display_mem;
   VkPhysicalDeviceMemoryProperties render_mem;
-  VkDevice render_gpu;
-  VkDevice display_gpu;
+  VkDevice render_gpu = VK_NULL_HANDLE;
+  VkDevice display_gpu = VK_NULL_HANDLE;
 
   std::unique_ptr<std::thread> thread;
-  CreateOtherDevice(VkPhysicalDevice display_dev, VkPhysicalDevice render_dev, VkDevice render_gpu):
-    display_dev(display_dev), render_dev(render_dev), render_gpu(render_gpu){
+  CreateOtherDevice(VkPhysicalDevice display_dev, VkPhysicalDevice render_dev):
+    display_dev(display_dev), render_dev(render_dev){
+  }
+  void setRenderDevice(VkDevice render_gpu){
+    this->render_gpu = render_gpu;
   }
   void finish(std::function<VkResult(VkDeviceCreateInfo &createInfo, VkDevice &dev)> creator){
     auto &minstance_info = instance_info[GetKey(render_dev)];
@@ -751,34 +754,34 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
   // store info for subsequent create call
   const auto targetLayerInfo = layerCreateInfo->u.pLayerInfo;
 
-  PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
-  VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
+  auto display_dev = my_instance_info.display;
   {
-    if(!my_instance_info.secondarySpawned){
-      my_instance_info.secondarySpawned = true;
-      TRACE("spawning secondary device creation: " << &my_instance_info);
-      auto display_dev = my_instance_info.display;
-      
+    scoped_lock l(global_lock);
+    my_instance_info.cod = new CreateOtherDevice{display_dev, physicalDevice};
+  }
+  if(my_instance_info.layerCreateDevice != nullptr){
+    auto createDevice = my_instance_info.layerCreateDevice;
+    my_instance_info.cod->finish([createDevice,&my_instance_info](VkDeviceCreateInfo &createInfo, VkDevice &dev){
+      PFN_vkGetDeviceProcAddr gdpa = nullptr;
+      auto ret = createDevice(my_instance_info.instance, my_instance_info.display, &createInfo, nullptr, &dev, PrimusVK_GetInstanceProcAddr, &gdpa);
       {
 	scoped_lock l(global_lock);
-	my_instance_info.cod = new CreateOtherDevice{display_dev, physicalDevice, *pDevice};
+	device_instance_info[GetKey(dev)] = &my_instance_info;
+	device_dispatch[GetKey(dev)] = fetchDispatchTable(gdpa, &dev);
       }
-      if(my_instance_info.layerCreateDevice != nullptr){
-	auto createDevice = my_instance_info.layerCreateDevice;
-	my_instance_info.cod->finish([createDevice,&my_instance_info](VkDeviceCreateInfo &createInfo, VkDevice &dev){
-	  PFN_vkGetDeviceProcAddr gdpa = nullptr;
-	  auto ret = createDevice(my_instance_info.instance, my_instance_info.display, &createInfo, nullptr, &dev, PrimusVK_GetInstanceProcAddr, &gdpa);
-	  {
-	    scoped_lock l(global_lock);
-	    device_instance_info[GetKey(dev)] = &my_instance_info;
-	    device_dispatch[GetKey(dev)] = fetchDispatchTable(gdpa, &dev);
-	  }
-	  return ret;
-	});
-      }else{
-	my_instance_info.cod->start();
-	pthread_yield();
-      }
+      return ret;
+    });
+  }
+  PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
+  VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
+  my_instance_info.cod->setRenderDevice(*pDevice);
+  {
+    if(!my_instance_info.secondarySpawned && my_instance_info.layerCreateDevice == nullptr){
+      my_instance_info.secondarySpawned = true;
+      TRACE("spawning secondary device creation: " << &my_instance_info);
+      
+      my_instance_info.cod->start();
+      pthread_yield();
     }
   }
 
