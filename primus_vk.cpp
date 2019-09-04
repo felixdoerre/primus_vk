@@ -831,6 +831,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   }
   TRACE("Application requested " << pCreateInfo->minImageCount << " images.");
   VkDevice render_gpu = device;
+  const_cast<VkSwapchainCreateInfoKHR*>(pCreateInfo)->imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
   VkSwapchainCreateInfoKHR info2 = *pCreateInfo;
   info2.minImageCount = std::max(3u, pCreateInfo->minImageCount);
   info2.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
