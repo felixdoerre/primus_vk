@@ -1,5 +1,4 @@
-
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
+VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
     VkPhysicalDevice physicalDevice,
     uint32_t queueFamilyIndex,
     VkSurfaceKHR surface,
@@ -7,16 +6,14 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, queueFamilyIndex, surface, pSupported);
 }	    
-    
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(
+    VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(
     VkPhysicalDevice physicalDevice,
     VkSurfaceKHR surface,
     VkSurfaceCapabilitiesKHR* pSurfaceCapabilities) {
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceCapabilitiesKHR(phy, surface, pSurfaceCapabilities);
 }	    
-    
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormatsKHR(
+    VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormatsKHR(
     VkPhysicalDevice physicalDevice,
     VkSurfaceKHR surface,
     uint32_t* pSurfaceFormatCount,
@@ -24,8 +21,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormatsKHR(
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormatsKHR(phy, surface, pSurfaceFormatCount, pSurfaceFormats);
 }	    
-    
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfacePresentModesKHR(
+    VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfacePresentModesKHR(
     VkPhysicalDevice physicalDevice,
     VkSurfaceKHR surface,
     uint32_t* pPresentModeCount,
@@ -33,16 +29,14 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfacePresentMode
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfacePresentModesKHR(phy, surface, pPresentModeCount, pPresentModes);
 }	    
-    
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilities2EXT(
+    VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilities2EXT(
     VkPhysicalDevice physicalDevice,
     VkSurfaceKHR surface,
     VkSurfaceCapabilities2EXT* pSurfaceCapabilities) {
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceCapabilities2EXT(phy, surface, pSurfaceCapabilities);
 }	    
-    
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDevicePresentRectanglesKHR(
+    VkResult VKAPI_CALL PrimusVK_GetPhysicalDevicePresentRectanglesKHR(
     VkPhysicalDevice physicalDevice,
     VkSurfaceKHR surface,
     uint32_t* pRectCount,
@@ -50,16 +44,14 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDevicePresentRectanglesK
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDevicePresentRectanglesKHR(phy, surface, pRectCount, pRects);
 }	    
-    
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilities2KHR(
+    VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilities2KHR(
     VkPhysicalDevice physicalDevice,
     const VkPhysicalDeviceSurfaceInfo2KHR* pSurfaceInfo,
     VkSurfaceCapabilities2KHR* pSurfaceCapabilities) {
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceCapabilities2KHR(phy, pSurfaceInfo, pSurfaceCapabilities);
 }	    
-    
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormats2KHR(
+    VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormats2KHR(
     VkPhysicalDevice physicalDevice,
     const VkPhysicalDeviceSurfaceInfo2KHR* pSurfaceInfo,
     uint32_t* pSurfaceFormatCount,
@@ -67,4 +59,3 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceFormats2KHR
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormats2KHR(phy, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
 }	    
-    

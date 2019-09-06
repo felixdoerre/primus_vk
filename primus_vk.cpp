@@ -2,9 +2,6 @@
 #include "vk_layer.h"
 #include "vk_layer_dispatch_table.h"
 
-#include <xcb/xcb.h>
-#include <vulkan/vulkan_xcb.h>
-
 #include <cassert>
 #include <cstring>
 
@@ -207,7 +204,7 @@ std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
 // Layer init and shutdown
 VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice);
 VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkInstance instance, const char *pName);
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
+VkResult VKAPI_CALL PrimusVK_CreateInstance(
     const VkInstanceCreateInfo*                 pCreateInfo,
     const VkAllocationCallbacks*                pAllocator,
     VkInstance*                                 pInstance)
@@ -282,7 +279,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateInstance(
   return VK_SUCCESS;
 }
 
-VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAllocator)
+void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAllocator)
 {
   scoped_lock l(global_lock);
 
@@ -724,7 +721,7 @@ void ImageWorker::initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory
 
 
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateDevice(
+VkResult VKAPI_CALL PrimusVK_CreateDevice(
     VkPhysicalDevice                            physicalDevice,
     const VkDeviceCreateInfo*                   pCreateInfo,
     const VkAllocationCallbacks*                pAllocator,
@@ -814,6 +811,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(DestroySwapchainKHR);
   FETCH(GetSwapchainImagesKHR);
   FETCH(AcquireNextImageKHR);
+  FETCH(GetSwapchainStatusKHR);
   FETCH(QueuePresentKHR);
 
   FETCH(CreateImage);
@@ -856,7 +854,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   return dispatchTable;
 }
 
-VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const VkAllocationCallbacks* pAllocator)
+void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const VkAllocationCallbacks* pAllocator)
 {
   scoped_lock l(global_lock);
   auto &my_instance = *device_instance_info[GetKey(device)];
@@ -867,7 +865,7 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const Vk
   device_dispatch.erase(GetKey(display_device));
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
+VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
   auto &my_instance = *device_instance_info[GetKey(device)];
   {
     if(my_instance.cod == nullptr){
@@ -916,7 +914,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device,
   return rc;
 }
 
-VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator) {
+void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator) {
     if(swapchain == VK_NULL_HANDLE) { return;}
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
   TRACE(">> Destroy swapchain: " << (void*) ch->backend);
@@ -924,7 +922,7 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DestroySwapchainKHR(VkDevice device, Vk
   device_dispatch[GetKey(ch->display_device)].DestroySwapchainKHR(ch->display_device, ch->backend, pAllocator);
   delete ch;
 }
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages) {
+VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages) {
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
 
   *pSwapchainImageCount = ch->images.size();
@@ -941,28 +939,44 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice devi
 
 const auto primus_start = std::chrono::steady_clock::now();
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
+VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex) {
   TRACE_PROFILING_EVENT(-1, "Acquire starting");
-  PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
+  PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(pAcquireInfo->swapchain);
 
   VkResult res;
   {
     Fence myfence{ch->display_device};
 
-    res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, timeout, VK_NULL_HANDLE, myfence.fence, pImageIndex);
+    res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, pAcquireInfo->timeout, VK_NULL_HANDLE, myfence.fence, pImageIndex);
     TRACE_PROFILING_EVENT(*pImageIndex, "got image");
 
     myfence.await();
   }
   VkSubmitInfo qsi{};
   qsi.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  qsi.signalSemaphoreCount = 1;
-  qsi.pSignalSemaphores = &semaphore;
+  if(pAcquireInfo->semaphore != VK_NULL_HANDLE){
+    qsi.signalSemaphoreCount = 1;
+    qsi.pSignalSemaphores = &pAcquireInfo->semaphore;
+  }
   scoped_lock lock(*device_instance_info[GetKey(ch->render_queue)]->renderQueueMutex);
-  device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, fence);
+  device_dispatch[GetKey(ch->render_queue)].QueueSubmit(ch->render_queue, 1, &qsi, pAcquireInfo->fence);
   TRACE_PROFILING_EVENT(*pImageIndex, "Acquire done");
 
   return res;
+}
+VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
+  auto acquireInfo = VkAcquireNextImageInfoKHR{
+    .sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
+    .swapchain = swapchain,
+    .timeout = timeout,
+    .semaphore = semaphore,
+    .fence = fence
+  };
+  return PrimusVK_AcquireNextImage2KHR(device, &acquireInfo, pImageIndex);
+}
+VkResult VKAPI_CALL PrimusVK_GetSwapchainStatusKHR(VkDevice device, VkSwapchainKHR swapchain){
+  PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(swapchain);
+  return device_dispatch[GetKey(ch->display_device)].GetSwapchainStatusKHR(device, ch->backend);
 }
 
 std::tuple<ssize_t, ssize_t, ssize_t> PrimusSwapchain::getImageMemories(){
@@ -1165,14 +1179,14 @@ void PrimusSwapchain::run(){
   }
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueueSubmit(VkQueue queue, uint32_t submitCount,
+VkResult VKAPI_CALL PrimusVK_QueueSubmit(VkQueue queue, uint32_t submitCount,
 							 const VkSubmitInfo* pSubmits,
 							 VkFence fence) {
   scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
   return device_dispatch[GetKey(queue)].QueueSubmit(queue, submitCount, pSubmits, fence);
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
+VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
   scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
   const auto start = std::chrono::steady_clock::now();
   if(pPresentInfo->swapchainCount != 1){
@@ -1190,24 +1204,17 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, cons
   return VK_SUCCESS;
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_CreateXcbSurfaceKHR(VkInstance instance, const VkXcbSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface) {
-  TRACE("Fetching function...");
-  PFN_vkCreateXcbSurfaceKHR fn = (PFN_vkCreateXcbSurfaceKHR)instance_dispatch[GetKey(instance)].GetInstanceProcAddr(instance, "vkCreateXcbSurfaceKHR");
-  TRACE("Xcb create surface: " << fn);
-  return fn(instance, pCreateInfo, pAllocator, pSurface);
-}
-
-VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physicalDevice, uint32_t* pQueueFamilyPropertyCount, VkQueueFamilyProperties* pQueueFamilyProperties) {
+void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physicalDevice, uint32_t* pQueueFamilyPropertyCount, VkQueueFamilyProperties* pQueueFamilyProperties) {
   VkPhysicalDevice phy = physicalDevice;
   instance_dispatch[GetKey(phy)].GetPhysicalDeviceQueueFamilyProperties(phy, pQueueFamilyPropertyCount, pQueueFamilyProperties);
 }
 
-VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_QueueWaitIdle(VkQueue queue){
+void VKAPI_CALL PrimusVK_QueueWaitIdle(VkQueue queue){
   scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
   device_dispatch[GetKey(queue)].QueueWaitIdle(queue);
 }
 
-VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DeviceWaitIdle(VkDevice device){
+void VKAPI_CALL PrimusVK_DeviceWaitIdle(VkDevice device){
   auto &my_instance = *device_instance_info[GetKey(device)];
   device_dispatch[GetKey(device)].DeviceWaitIdle(device);
   device_dispatch[GetKey(my_instance.cod->display_gpu)].DeviceWaitIdle(my_instance.cod->display_gpu);
@@ -1218,7 +1225,7 @@ VK_LAYER_EXPORT void VKAPI_CALL PrimusVK_DeviceWaitIdle(VkDevice device){
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Enumeration function
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumerateInstanceLayerProperties(uint32_t *pPropertyCount,
+VkResult VKAPI_CALL PrimusVK_EnumerateInstanceLayerProperties(uint32_t *pPropertyCount,
                                                                        VkLayerProperties *pProperties)
 {
   if(pPropertyCount) *pPropertyCount = 1;
@@ -1234,13 +1241,13 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumerateInstanceLayerProperties(ui
   return VK_SUCCESS;
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumerateDeviceLayerProperties(
+VkResult VKAPI_CALL PrimusVK_EnumerateDeviceLayerProperties(
     VkPhysicalDevice physicalDevice, uint32_t *pPropertyCount, VkLayerProperties *pProperties)
 {
   return PrimusVK_EnumerateInstanceLayerProperties(pPropertyCount, pProperties);
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumerateInstanceExtensionProperties(
+VkResult VKAPI_CALL PrimusVK_EnumerateInstanceExtensionProperties(
     const char *pLayerName, uint32_t *pPropertyCount, VkExtensionProperties *pProperties)
 {
   if(pLayerName == NULL || strcmp(pLayerName, "VK_LAYER_PRIMUS_PrimusVK"))
@@ -1251,7 +1258,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumerateInstanceExtensionPropertie
   return VK_SUCCESS;
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumerateDeviceExtensionProperties(
+VkResult VKAPI_CALL PrimusVK_EnumerateDeviceExtensionProperties(
                                      VkPhysicalDevice physicalDevice, const char *pLayerName,
                                      uint32_t *pPropertyCount, VkExtensionProperties *pProperties)
 {
@@ -1270,7 +1277,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumerateDeviceExtensionProperties(
   return VK_SUCCESS;
 }
 
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
+VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
     VkInstance                                  instance,
     uint32_t*                                   pPhysicalDeviceCount,
     VkPhysicalDevice*                           pPhysicalDevices){
@@ -1294,7 +1301,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
   }
   return res;
 }
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroups(
+VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroups(
     VkInstance                                  instance,
     uint32_t*                                   pPhysicalDeviceGroupCount,
     VkPhysicalDeviceGroupProperties*            pPhysicalDeviceGroupProperties) {
@@ -1309,7 +1316,7 @@ VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroups(
   }
   return VK_SUCCESS;
 }
-VK_LAYER_EXPORT VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroupsKHR(
+VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroupsKHR(
     VkInstance                                  instance,
     uint32_t*                                   pPhysicalDeviceGroupCount,
     VkPhysicalDeviceGroupProperties*            pPhysicalDeviceGroupProperties) {
@@ -1335,15 +1342,16 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetDeviceProcAddr(VkDevic
   GETPROCADDR(DestroySwapchainKHR);
   GETPROCADDR(GetSwapchainImagesKHR);
   GETPROCADDR(AcquireNextImageKHR);
+  GETPROCADDR(AcquireNextImage2KHR);
+  GETPROCADDR(GetSwapchainStatusKHR);
   GETPROCADDR(QueuePresentKHR);
+
   GETPROCADDR(QueueSubmit);
   GETPROCADDR(DeviceWaitIdle);
   GETPROCADDR(QueueWaitIdle);
 #define FORWARD(func) GETPROCADDR(func)
 #include "primus_vk_forwarding.h"
 #undef FORWARD
-  GETPROCADDR(CreateXcbSurfaceKHR);
-
   {
     scoped_lock l(global_lock);
     return device_dispatch[GetKey(device)].GetDeviceProcAddr(device, pName);
@@ -1373,7 +1381,10 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
   GETPROCADDR(DestroySwapchainKHR);
   GETPROCADDR(GetSwapchainImagesKHR);
   GETPROCADDR(AcquireNextImageKHR);
+  GETPROCADDR(AcquireNextImage2KHR);
+  GETPROCADDR(GetSwapchainStatusKHR);
   GETPROCADDR(QueuePresentKHR);
+
   GETPROCADDR(QueueSubmit);
   GETPROCADDR(DeviceWaitIdle);
   GETPROCADDR(QueueWaitIdle);
@@ -1382,8 +1393,6 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
 #define FORWARD(func) GETPROCADDR(func)
 #include "primus_vk_forwarding.h"
 #undef FORWARD
-
-  // GETPROCADDR(CreateXcbSurfaceKHR);
   {
     scoped_lock l(global_lock);
     return instance_dispatch[GetKey(instance)].GetInstanceProcAddr(instance, pName);
