@@ -69,7 +69,6 @@ public:
   VkPhysicalDevice display = VK_NULL_HANDLE;
   CreateOtherDevice *cod = nullptr;
 
-  bool secondarySpawned = false;
   std::shared_ptr<std::mutex> renderQueueMutex = std::make_shared<std::mutex>();
   InstanceInfo() = default;
   InstanceInfo(const InstanceInfo &) = delete;
@@ -197,9 +196,6 @@ std::map<void *, InstanceInfo> instance_info;
 std::map<void *, InstanceInfo*> device_instance_info;
 std::map<void *, VkLayerDispatchTable> device_dispatch;
 
-std::shared_ptr<void> libvulkan(dlopen("libvulkan.so.1", RTLD_NOW), dlclose);
-
-
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Layer init and shutdown
 VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice);
@@ -219,15 +215,17 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
       layer_link_info = layerCreateInfo;
     }
     if ( layerCreateInfo->sType == VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO &&  layerCreateInfo->function == VK_LOADER_LAYER_CREATE_DEVICE_CALLBACK) {
-      if(getenv("PRIMUS_VK_OLD_API") == nullptr){
-	layerCreateDevice = layerCreateInfo->u.layerDevice.pfnLayerCreateDevice;
-	layerDestroyDevice = layerCreateInfo->u.layerDevice.pfnLayerDestroyDevice;
-      }
+      layerCreateDevice = layerCreateInfo->u.layerDevice.pfnLayerCreateDevice;
+      layerDestroyDevice = layerCreateInfo->u.layerDevice.pfnLayerDestroyDevice;
     }
     layerCreateInfo = (VkLayerInstanceCreateInfo *)layerCreateInfo->pNext;
   }
 
   if(layer_link_info == nullptr) {
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  if(layerCreateDevice == nullptr || layerDestroyDevice == nullptr) {
+    TRACE("Loader did not supply layer device creation callbacks. Please upgrade to vulkan >= 1.1.108");
     return VK_ERROR_INITIALIZATION_FAILED;
   }
 
@@ -255,18 +253,6 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
   FORWARD(GetPhysicalDeviceQueueFamilyProperties);
 #include "primus_vk_forwarding.h"
 #undef FORWARD
-
-  if(layerCreateDevice == nullptr) {
-    TRACE("Linking to libvulkan.so.1 as fallback");
-#define _FORWARD(x) loader_dispatch.x =(PFN_vk##x) dlsym(libvulkan.get(), "vk" #x);
-  _FORWARD(CreateDevice);
-  _FORWARD(EnumeratePhysicalDevices);
-  _FORWARD(GetPhysicalDeviceMemoryProperties);
-  _FORWARD(GetPhysicalDeviceQueueFamilyProperties);
-#undef _FORWARD
-  } else {
-    libvulkan.reset();
-  }
 
   // store the table by key
   {
@@ -514,7 +500,6 @@ public:
   VkDevice render_gpu = VK_NULL_HANDLE;
   VkDevice display_gpu = VK_NULL_HANDLE;
 
-  std::unique_ptr<std::thread> thread;
   CreateOtherDevice(VkPhysicalDevice display_dev, VkPhysicalDevice render_dev):
     display_dev(display_dev), render_dev(render_dev){
   }
@@ -585,15 +570,6 @@ public:
     createDisplayDev([this](VkDeviceCreateInfo &createInfo, VkDevice &dev){
       return loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &dev);
     });
-  }
-
-  void start(){
-    thread = std::unique_ptr<std::thread>(new std::thread([this](){this->run();}));
-  }
-  void join(){
-    if(thread == nullptr) { TRACE( "Refusing second join" ); return; }
-    thread->join();
-    thread.reset();
   }
 };
 
@@ -748,39 +724,25 @@ VkResult VKAPI_CALL PrimusVK_CreateDevice(
   // move chain on for next layer
   layerCreateInfo->u.pLayerInfo = layerCreateInfo->u.pLayerInfo->pNext;
 
-  // store info for subsequent create call
-  const auto targetLayerInfo = layerCreateInfo->u.pLayerInfo;
-
   auto display_dev = my_instance_info.display;
   {
     scoped_lock l(global_lock);
     my_instance_info.cod = new CreateOtherDevice{display_dev, physicalDevice};
   }
-  if(my_instance_info.layerCreateDevice != nullptr){
-    auto createDevice = my_instance_info.layerCreateDevice;
-    my_instance_info.cod->finish([createDevice,&my_instance_info](VkDeviceCreateInfo &createInfo, VkDevice &dev){
-      PFN_vkGetDeviceProcAddr gdpa = nullptr;
-      auto ret = createDevice(my_instance_info.instance, my_instance_info.display, &createInfo, nullptr, &dev, PrimusVK_GetInstanceProcAddr, &gdpa);
-      {
-	scoped_lock l(global_lock);
-	device_instance_info[GetKey(dev)] = &my_instance_info;
-	device_dispatch[GetKey(dev)] = fetchDispatchTable(gdpa, &dev);
-      }
-      return ret;
-    });
-  }
+  auto createDevice = my_instance_info.layerCreateDevice;
+  my_instance_info.cod->finish([createDevice,&my_instance_info](VkDeviceCreateInfo &createInfo, VkDevice &dev){
+    PFN_vkGetDeviceProcAddr gdpa = nullptr;
+    auto ret = createDevice(my_instance_info.instance, my_instance_info.display, &createInfo, nullptr, &dev, PrimusVK_GetInstanceProcAddr, &gdpa);
+    {
+      scoped_lock l(global_lock);
+      device_instance_info[GetKey(dev)] = &my_instance_info;
+      device_dispatch[GetKey(dev)] = fetchDispatchTable(gdpa, &dev);
+    }
+    return ret;
+  });
   PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
   my_instance_info.cod->setRenderDevice(*pDevice);
-  {
-    if(!my_instance_info.secondarySpawned && my_instance_info.layerCreateDevice == nullptr){
-      my_instance_info.secondarySpawned = true;
-      TRACE("spawning secondary device creation: " << &my_instance_info);
-      
-      my_instance_info.cod->start();
-      pthread_yield();
-    }
-  }
 
   // store the table by key
   {
@@ -799,7 +761,6 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerDispatchTable dispatchTable;
 #define FETCH(x) dispatchTable.x = (PFN_vk##x) gdpa(*pDevice, "vk" #x);
-#define _FETCH(x) dispatchTable.x =(PFN_vk##x) (libvulkan?(PFN_vkVoidFunction)dlsym(libvulkan.get(), "vk" #x): gdpa(*pDevice, "vk" #x));
   FETCH(GetDeviceProcAddr);
   FETCH(DestroyDevice);
   FETCH(BeginCommandBuffer);
@@ -825,7 +786,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(UnmapMemory);
 
 
-  _FETCH(AllocateCommandBuffers);
+  FETCH(AllocateCommandBuffers);
   FETCH(BeginCommandBuffer);
   FETCH(CmdCopyImage);
   FETCH(CmdPipelineBarrier);
@@ -840,7 +801,7 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(DeviceWaitIdle);
   FETCH(QueueWaitIdle);
 
-  _FETCH(GetDeviceQueue);
+  FETCH(GetDeviceQueue);
 
   FETCH(CreateFence);
   FETCH(WaitForFences);
@@ -867,16 +828,6 @@ void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const VkAllocationCallba
 
 VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
   auto &my_instance = *device_instance_info[GetKey(device)];
-  {
-    if(my_instance.cod == nullptr){
-      std::cerr << "no thread to join\n";
-      return VK_ERROR_INITIALIZATION_FAILED;
-    }
-    TRACE("joining secondary device creation");
-    TRACE("When startup hangs here, you have probably hit the initialization deadlock");
-    my_instance.cod->join();
-    TRACE("joining succeeded. Luckily initialization deadlock did not occur.");
-  }
   TRACE("Application requested " << pCreateInfo->minImageCount << " images.");
   VkDevice render_gpu = device;
   VkSwapchainCreateInfoKHR info2 = *pCreateInfo;
