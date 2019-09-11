@@ -1,6 +1,7 @@
 #include <vulkan.h>
 #include <dlfcn.h>
 
+#include <string>
 #include <iostream>
 
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t* pSupportedVersion);
@@ -26,7 +27,17 @@ public:
     // again asked to load libGL.
     glLibGL = dlopen("libGL.so.1", RTLD_GLOBAL | RTLD_NOW);
 
-    nvDriver = dlopen(NV_DRIVER_PATH, RTLD_LOCAL | RTLD_LAZY);
+    std::string drivers(NV_DRIVER_PATH);
+    while(!nvDriver && drivers.size() > 0){
+      auto end = drivers.find(':');
+      if(end == std::string::npos) {
+	nvDriver = dlopen(drivers.c_str(), RTLD_LOCAL | RTLD_LAZY);
+      } else {
+	std::string this_driver = drivers.substr(0, end);
+	nvDriver = dlopen(this_driver.c_str(), RTLD_LOCAL | RTLD_LAZY);
+	drivers = drivers.substr(end+1);
+      }
+    }
     if(!nvDriver) {
       std::cerr << "PrimusVK: ERROR! Nvidia driver could not be loaded from '" NV_DRIVER_PATH "'.\n";
       return;
