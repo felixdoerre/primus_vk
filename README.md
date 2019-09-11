@@ -22,6 +22,14 @@ Additinonally, only images with `VK_IMAGE_TILING_OPTIMAL` can be rendered to and
 
 An idea might be to use `VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT` to map one device's memory and use that directly on the other device (or import host-allocated memory on both devices). However that is not implemented yet.
 
+## Dependencies
+This layer requires two working vulkan drivers. The only hardware that I have experience with are Intel Integrated Graphics + Nvidia. However it should theoretically work with any other graphics setup of two vulkan-compatible graphics devices. For the Nvidia graphics card, both the "nonglvd" and the "glvnd" proprietary driver seem to work.
+
+To use this layer you will require something similar to bumblebee to poweron/off the dedicated graphics card.
+
+Due to a bug/missing feature in the Vulkan Loader you will need `Vulkan/libvulkan >= 1.1.108`. If you have an older system you can try primus_vk version 1.1 which contains an ugly workaround for that issue and is therefore compatible with older Vulkan versions.
+
+
 ## Development Status
 
 This layer works for the applications I tested it with, but has still some technical difficulties (see Technical Limitations). Additionally the image copy still introduces too much overhead.
@@ -29,19 +37,16 @@ However this layer should already be usable with most applications.
 
 ## Technical Limitations
 
-1. The layer might deadlock on swapchain creation. I currently have no easy way to fix this. However real applications (and not demos) tend to spend enough time between `vkCreateDevice` and `vkCreateSwapchainKHR` that this deadlock never occurs. This is due to the vk_layer limitation that creating dispatchable objects is quite complex. I have the problem, that I need a new `VkDevice` from a `VkPhysicalDevice` where the application never calls `vkCreateDevice` upon. So the code from the Vulkan Loader that builds the layer/ICD chain is only executed once. The only way to call it again is to call the Loader again which might deadlock in the Loader global lock.
+1. The NVIDIA driver always connect to the "default" X-Display to verify that it has the NV-GLX extensions availible. Otherwise the NVIDIA-vulkan-icd driver disables itself. For testing an intermediate solution is to modify the demo application to always use ":0" and set DISPLAY to ":8" to make the NV-Driver happy. However this approach does work on general applications that cannot be modified. So this issue has to be solved in the graphics driver.
 
-2. The NVIDIA driver always connect to the "default" X-Display to verify that it has the NV-GLX extensions availible. Otherwise the NVIDIA-vulkan-icd driver disables itself. For testing an intermediate solution is to modify the demo application to always use ":0" and set DISPLAY to ":8" to make the NV-Driver happy. However this approach does work on general applications that cannot be modified. So this issue has to be solved in the graphics driver.
+2. Currently under Debian unstable the nvidia-icd is registered with a non-absolute library path in `/usr/share/vulkan/icd.d/nvidia_icd.json`. Replace `libGL.so.1` with `/usr/lib/x86_64-linux-gnu/nvidia/libGL.so.1` there to always load the intended Vulkan driver.
 
-3. Currently under Debian unstable the nvidia-icd is registered with a non-absolute library path in `/usr/share/vulkan/icd.d/nvidia_icd.json`. Replace `libGL.so.1` with `/usr/lib/x86_64-linux-gnu/nvidia/libGL.so.1` there to always load the intended Vulkan driver.
-
-
-4. When running an applications with DXVK and wine, wine loads both Vulkan and OpenGL. This creates a problem as:
+3. When running an applications with DXVK and wine, wine loads both Vulkan and OpenGL. This creates a problem as:
 	1. Wine loads Vulkan, which loades the integrated GPU's ICD, the Nvidia ICD (contained in Nvidia's libGL.so on my system), Primus-VK and potentially more.
 	2. Wine loads OpenGL, which should be satisfied by OpenGL-Primus. However for whatever reason wine directly gets Nvidia's libGL which fails to provide an OpenGL context for the primary X screen.
 	This needs to be prevented by forcing wine to load Primus' libGL.
 
-Issues 2.,3. and 4. can be worked around by compiling `libnv_vulkan_wrapper.so` and registering it instead of nvidia's `libGL.so.1` in `/usr/share/vulkan/icd.d/nvidia_icd.json`.
+Issues 1.,2. and 3. can be worked around by compiling `libnv_vulkan_wrapper.so` and registering it instead of nvidia's `libGL.so.1` in `/usr/share/vulkan/icd.d/nvidia_icd.json`.
 
 ## Installation
 ### Locally
@@ -53,7 +58,7 @@ Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the pat
 ## Howto
 
 1. Use `make libprimus_vk.so libnv_vulkan_wrapper.so` to compile Primus-vk and `libnv_vulkan_wrapper.so` (check that the path to the nvidia-driver in `nv_vulkan_wrapper.so` is correct).
-2. Patch path in `/usr/share/vulkan/icd.d/nvidia_icd.json` to point to the compiled `libnv_vulkan_wrapper.so`.
+2. Ensure that the (unwrapped) nvidia driver is not registered (e.g. in `/usr/share/vulkan/icd.d/nvidia_icd.json`) and create a similar file `nv_vulkan_wrapper.json` where the path to the driver points to the compiled `libnv_vulkan_wrapper.so`.
 3. (Optional) Run `optirun primus_vk_diag`. It has to display entries for both graphics cards, otherwise the driver setup is broken.
 4. Install `primus_vk.json` and adjust path.
 5. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
