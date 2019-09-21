@@ -431,6 +431,8 @@ struct PrimusSwapchain{
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
     device_dispatch[GetKey(display_device)].GetDeviceQueue(display_device, 0, 0, &display_queue);
+    GetKey(render_queue) = GetKey(device); // TODO, use vkSetDeviceLoaderData instead
+    GetKey(display_queue) = GetKey(display_device);
 
     uint32_t image_count;
     device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &image_count, nullptr);
