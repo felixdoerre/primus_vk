@@ -67,7 +67,7 @@ public:
 
   VkPhysicalDevice render = VK_NULL_HANDLE;
   VkPhysicalDevice display = VK_NULL_HANDLE;
-  CreateOtherDevice *cod = nullptr;
+  std::map<void*, std::shared_ptr<CreateOtherDevice>> cod = {};
 
   std::shared_ptr<std::mutex> renderQueueMutex = std::make_shared<std::mutex>();
   InstanceInfo() = default;
@@ -424,9 +424,9 @@ struct PrimusSwapchain{
 
   std::vector<std::unique_ptr<std::thread>> threads;
 
-  CreateOtherDevice *cod;
+  std::shared_ptr<CreateOtherDevice> cod;
   PrimusSwapchain(PrimusSwapchain &) = delete;
-  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount, CreateOtherDevice *cod):
+  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount, std::shared_ptr<CreateOtherDevice> &cod):
     device(device), display_device(display_device), backend(backend), cod(cod){
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
@@ -727,12 +727,13 @@ VkResult VKAPI_CALL PrimusVK_CreateDevice(
   layerCreateInfo->u.pLayerInfo = layerCreateInfo->u.pLayerInfo->pNext;
 
   auto display_dev = my_instance_info.display;
+  std::shared_ptr<CreateOtherDevice> cod = nullptr;
   {
     scoped_lock l(global_lock);
-    my_instance_info.cod = new CreateOtherDevice{display_dev, physicalDevice};
+    cod = std::make_shared<CreateOtherDevice>(display_dev, physicalDevice);
   }
   auto createDevice = my_instance_info.layerCreateDevice;
-  my_instance_info.cod->finish([createDevice,&my_instance_info](VkDeviceCreateInfo &createInfo, VkDevice &dev){
+  cod->finish([createDevice,&my_instance_info](VkDeviceCreateInfo &createInfo, VkDevice &dev){
     PFN_vkGetDeviceProcAddr gdpa = nullptr;
     auto ret = createDevice(my_instance_info.instance, my_instance_info.display, &createInfo, nullptr, &dev, PrimusVK_GetInstanceProcAddr, &gdpa);
     {
@@ -744,7 +745,8 @@ VkResult VKAPI_CALL PrimusVK_CreateDevice(
   });
   PFN_vkCreateDevice createFunc = (PFN_vkCreateDevice)gipa(VK_NULL_HANDLE, "vkCreateDevice");
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
-  my_instance_info.cod->setRenderDevice(*pDevice);
+  cod->setRenderDevice(*pDevice);
+  my_instance_info.cod[GetKey(*pDevice)] = cod;
 
   // store the table by key
   {
@@ -821,9 +823,10 @@ void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const VkAllocationCallba
 {
   scoped_lock l(global_lock);
   auto &my_instance = *device_instance_info[GetKey(device)];
-  device_dispatch[GetKey(device)].DestroyDevice(device, pAllocator);
-  auto &display_device = my_instance.cod->display_gpu;
+  auto &display_device = my_instance.cod[GetKey(device)]->display_gpu;
   my_instance.layerDestroyDevice(display_device, nullptr, device_dispatch[GetKey(display_device)].DestroyDevice);
+  device_dispatch[GetKey(device)].DestroyDevice(device, pAllocator);
+  my_instance.cod.erase(GetKey(device));
   device_dispatch.erase(GetKey(device));
   device_dispatch.erase(GetKey(display_device));
 }
@@ -846,7 +849,7 @@ VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapcha
   TRACE("Creating Swapchain for size: " << pCreateInfo->imageExtent.width << "x" << pCreateInfo->imageExtent.height);
   TRACE("MinImageCount: " << pCreateInfo->minImageCount);
   TRACE("fetching device for: " << GetKey(render_gpu));
-  VkDevice display_gpu = my_instance.cod->display_gpu;
+  VkDevice display_gpu = my_instance.cod[GetKey(device)]->display_gpu;
 
   TRACE("FamilyIndexCount: " <<  pCreateInfo->queueFamilyIndexCount);
   TRACE("Dev: " << GetKey(display_gpu));
@@ -859,7 +862,7 @@ VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapcha
     return rc;
   }
 
-  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount, my_instance.cod);
+  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount, my_instance.cod[GetKey(device)]);
 
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
@@ -1170,7 +1173,8 @@ void VKAPI_CALL PrimusVK_QueueWaitIdle(VkQueue queue){
 void VKAPI_CALL PrimusVK_DeviceWaitIdle(VkDevice device){
   auto &my_instance = *device_instance_info[GetKey(device)];
   device_dispatch[GetKey(device)].DeviceWaitIdle(device);
-  device_dispatch[GetKey(my_instance.cod->display_gpu)].DeviceWaitIdle(my_instance.cod->display_gpu);
+  auto display_gpu = my_instance.cod[GetKey(device)]->display_gpu;
+  device_dispatch[GetKey(display_gpu)].DeviceWaitIdle(display_gpu);
 }
 
 #include "primus_vk_forwarding_prototypes.h"
