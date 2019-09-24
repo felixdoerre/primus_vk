@@ -492,7 +492,6 @@ ImageWorker::~ImageWorker(){
   }
 }
 
-bool list_all_gpus = false;
 class CreateOtherDevice {
 public:
   VkPhysicalDevice display_dev;
@@ -537,41 +536,6 @@ public:
     if(ret != VK_SUCCESS){
       throw std::runtime_error("Display device creation failed");
     }
-  }
-  void run(){
-    auto &minstance_info = instance_info[GetKey(render_dev)];
-
-    TRACE("Device creation thread running");
-    uint32_t gpuCount;
-    list_all_gpus = true;
-    loader_dispatch.EnumeratePhysicalDevices(minstance_info.instance, &gpuCount, nullptr);
-    std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
-    loader_dispatch.EnumeratePhysicalDevices(minstance_info.instance, &gpuCount, physicalDevices.data());
-    list_all_gpus = false;
-
-    display_dev = physicalDevices[1];
-    TRACE("phys[1]: " << display_dev);
-
-    loader_dispatch.GetPhysicalDeviceMemoryProperties(display_dev, &display_mem);
-    loader_dispatch.GetPhysicalDeviceMemoryProperties(physicalDevices[0], &render_mem);
-
-    std::vector<VkQueueFamilyProperties> queueFamilyProperties;
-    if(true){
-      auto getQueues = loader_dispatch.GetPhysicalDeviceQueueFamilyProperties;
-      uint32_t queueFamilyCount;
-      getQueues(display_dev, &queueFamilyCount, nullptr);
-      assert(queueFamilyCount > 0);
-      queueFamilyProperties.resize(queueFamilyCount);
-      getQueues(display_dev, &queueFamilyCount, queueFamilyProperties.data());
-      TRACE("render queues: " << queueFamilyCount);
-      for(auto &props : queueFamilyProperties){
-	TRACE(" flags: " << props.queueFlags);
-      }
-    }
-
-    createDisplayDev([this](VkDeviceCreateInfo &createInfo, VkDevice &dev){
-      return loader_dispatch.CreateDevice(display_dev, &createInfo, nullptr, &dev);
-    });
   }
 };
 
@@ -1238,25 +1202,16 @@ VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
     VkInstance                                  instance,
     uint32_t*                                   pPhysicalDeviceCount,
     VkPhysicalDevice*                           pPhysicalDevices){
-  int cnt = 1;
-  if(list_all_gpus) cnt = 2;
+  const int cnt = 1;
   if(pPhysicalDevices == nullptr){
     *pPhysicalDeviceCount = cnt;
     return VK_SUCCESS;
   }
   scoped_lock l(global_lock);
-  VkResult res = instance_dispatch[GetKey(instance)].EnumeratePhysicalDevices(instance, pPhysicalDeviceCount, nullptr);
-  if(res != VK_SUCCESS) return res;
-  std::vector<VkPhysicalDevice> vec{*pPhysicalDeviceCount};
-  res = instance_dispatch[GetKey(instance)].EnumeratePhysicalDevices(instance, pPhysicalDeviceCount, vec.data());
-  if(res != VK_SUCCESS) return res;
   InstanceInfo &info = instance_info[GetKey(instance)];
   pPhysicalDevices[0] = info.render;
   *pPhysicalDeviceCount = cnt;
-  if(cnt >= 2){
-    pPhysicalDevices[1] = info.display;
-  }
-  return res;
+  return VK_SUCCESS;
 }
 VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroups(
     VkInstance                                  instance,
