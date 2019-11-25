@@ -6,9 +6,15 @@ It is basically the same as Primus for OpenGL (https://github.com/amonakov/primu
 
 ## Usage
 
-First you need to install `primus_vk`. On Archlinux there are official packages ([for 64-bit games](https://www.archlinux.org/packages/community/x86_64/primus_vk/), [for 32-bit games](https://www.archlinux.org/packages/multilib/x86_64/lib32-primus_vk/)). For other distributions you will likely need to [manually install](#installation) `primus_vk`.
+First you need to install `primus_vk`:
+ * On Archlinux there are official packages ([for 64-bit games](https://www.archlinux.org/packages/community/x86_64/primus_vk/), [for 32-bit games](https://www.archlinux.org/packages/multilib/x86_64/lib32-primus_vk/)).
+ * On Debian (from bullseye on) you should use `primus-vk-nvidia` (which recommends `primus-vk-nvidia-i386` for 32-bit games), which already is preconfigured for the Nvidia dedicated + Intel integrated graphics setup. When you have a different setup, you should install just `primus-vk` (which installs only the bare `primus_vk`-library and neither graphics drivers not the `pvkrun`-runner), select the Vulkan drivers you need yourself and then invoke `primus_vk` manually.
+ * For other distributions you will likely need to [manually install](#installation) `primus_vk`.
 
-To run an application with `primus_vk` prefix the command with `ENABLE_PRIMUS_LAYER=1 optirun`. So instead of running `path/to/application`, invoke `ENABLE_PRIMUS_LAYER=1 optirun path/to/application` instead.
+To run an application with `primus_vk` prefix the command with `pvkrun` (which in the easiest case is just `ENABLE_PRIMUS_LAYER=1 optirun`). So instead of running `path/to/application`, invoke `pvkrun path/to/application` instead. You should be able to use `pvkrun` for all applications, independently of them using Vulkan, OpenGL or both.
+
+By default `primus_vk` chooses a graphics card marked as `dedicated` and one note marked as `dedicated`. If that does not fit on your scenario, you need to specify the devices used for rendering and displaying manually. You can use `PRIMUS_VK_DISPLAYID` and `PRIMUS_VK_RENDERID` and give them the `deviceID`s from `optirun env DISPLAY=:8 vulkaninfo`. That way you can force `primus_vk` to work in a variety of different scenarios (e.g. having two dedicated graphics cards and rendering on one, while displaying on the other).
+
 
 ## Idea
 
@@ -23,7 +29,7 @@ Additinonally, only images with `VK_IMAGE_TILING_OPTIMAL` can be rendered to and
 An idea might be to use `VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT` to map one device's memory and use that directly on the other device (or import host-allocated memory on both devices). However that is not implemented yet.
 
 ## Dependencies
-This layer requires two working vulkan drivers. The only hardware that I have experience with are Intel Integrated Graphics + Nvidia. However it should theoretically work with any other graphics setup of two vulkan-compatible graphics devices. For the Nvidia graphics card, both the "nonglvd" and the "glvnd" proprietary driver seem to work.
+This layer requires two working vulkan drivers. The only hardware that I have experience with are Intel Integrated Graphics + Nvidia. However it should theoretically work with any other graphics setup of two vulkan-compatible graphics devices. For the Nvidia graphics card, both the "nonglvd" and the "glvnd" proprietary driver seem to work, however the "nonglvnd"-driver seems to be broken around `430.64` and is removed in newer versions.
 
 To use this layer you will require something similar to bumblebee to poweron/off the dedicated graphics card.
 
@@ -32,8 +38,7 @@ Due to a bug/missing feature in the Vulkan Loader you will need `Vulkan/libvulka
 
 ## Development Status
 
-This layer works for the applications I tested it with, but has still some technical difficulties (see Technical Limitations). Additionally the image copy still introduces too much overhead.
-However this layer should already be usable with most applications.
+This layer works for all the applications I tested it with, but uses a fair share of CPU resorces for copying.
 
 ## Technical Limitations
 
@@ -56,33 +61,12 @@ Create the folder `~/.local/share/vulkan/implicit_layer.d` and copy `primus_vk.j
 Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the path.
 
 ## Howto
-
-1. Use `make libprimus_vk.so libnv_vulkan_wrapper.so` to compile Primus-vk and `libnv_vulkan_wrapper.so` (check that the path to the nvidia-driver in `nv_vulkan_wrapper.so` is correct).
-2. Ensure that the (unwrapped) nvidia driver is not registered (e.g. in `/usr/share/vulkan/icd.d/nvidia_icd.json`) and create a similar file `nv_vulkan_wrapper.json` where the path to the driver points to the compiled `libnv_vulkan_wrapper.so`.
-3. (Optional) Run `optirun primus_vk_diag`. It has to display entries for both graphics cards, otherwise the driver setup is broken.
-4. Install `primus_vk.json` and adjust path.
-5. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
- If you want to specify the devices used for rendering and displaying manually, you can use `PRIMUS_VK_DISPLAYID` and `PRIMUS_VK_RENDERID` and give them the `deviceID`s from `optirun env DISPLAY=:8 vulkaninfo`.
-
-I tested this on Debian unstable.
-
-### Debian Packages that I used:
-
-```
-bumblebee-nvidia                                            3.2.1-17
-nvidia-driver                                               390.77-1
-nvidia-nonglvnd-vulkan-icd:amd64                            390.77-1
-nvidia-nonglvnd-vulkan-icd:i386                             390.77-1
-primus                                                      0~20150328-6
-mesa-vulkan-drivers:amd64                                   18.1.7-1
-```
-
-For testing a Windows DX11-Application, I used:
-```
-wine32-development:i386                                     3.14-1
-wine64-development                                          3.14-1
-```
-and dxvk-0.7 inside the wineprefix.
+1. Install the correct vulkan icds (i.e. intel/mesa, nvidia, amd, depending on your hardware).
+2. Use `make libprimus_vk.so libnv_vulkan_wrapper.so` to compile Primus-vk and `libnv_vulkan_wrapper.so` (check that the path to the nvidia-driver in `nv_vulkan_wrapper.so` is correct).
+3. Ensure that the (unwrapped) nvidia driver is not registered (e.g. in `/usr/share/vulkan/icd.d/nvidia_icd.json`) and create a similar file `nv_vulkan_wrapper.json` where the path to the driver points to the compiled `libnv_vulkan_wrapper.so`.
+4. (Optional) Run `optirun primus_vk_diag`. It has to display entries for both graphics cards, otherwise the driver setup is broken. You can also test with `optirun vulkaninfo` that your Vulkan drivers are at least detecting your graphics cards.
+5. Install `primus_vk.json` and adjust path.
+6. Run `ENABLE_PRIMUS_LAYER=1 optirun vulkan-smoketest`.
 
 ### Arch Linux
 
