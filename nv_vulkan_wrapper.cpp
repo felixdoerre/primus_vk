@@ -32,6 +32,7 @@ public:
       auto end = drivers.find(':');
       if(end == std::string::npos) {
 	nvDriver = dlopen(drivers.c_str(), RTLD_LOCAL | RTLD_LAZY);
+	drivers = "";
       } else {
 	std::string this_driver = drivers.substr(0, end);
 	nvDriver = dlopen(this_driver.c_str(), RTLD_LOCAL | RTLD_LAZY);
