@@ -1,5 +1,9 @@
+#define VK_USE_PLATFORM_XCB_KHR
+#define VK_USE_PLATFORM_XLIB_KHR
+#define VK_USE_PLATFORM_WAYLAND_KHR
 #include "vulkan.h"
 #include "vk_layer.h"
+
 #include "vk_layer_dispatch_table.h"
 
 #include <cassert>
@@ -251,6 +255,15 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
   FORWARD(GetPhysicalDeviceMemoryProperties);
   FORWARD(GetPhysicalDeviceQueueFamilyProperties);
+#ifdef VK_USE_PLATFORM_XCB_KHR
+  FORWARD(GetPhysicalDeviceXcbPresentationSupportKHR);
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+  FORWARD(GetPhysicalDeviceXlibPresentationSupportKHR);
+#endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  FORWARD(GetPhysicalDeviceWaylandPresentationSupportKHR);
+#endif
 #include "primus_vk_forwarding.h"
 #undef FORWARD
 
@@ -1128,6 +1141,35 @@ void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice
   VkPhysicalDevice phy = physicalDevice;
   instance_dispatch[GetKey(phy)].GetPhysicalDeviceQueueFamilyProperties(phy, pQueueFamilyPropertyCount, pQueueFamilyProperties);
 }
+#ifdef VK_USE_PLATFORM_XCB_KHR
+VkBool32 VKAPI_CALL PrimusVK_GetPhysicalDeviceXcbPresentationSupportKHR(
+    VkPhysicalDevice                            physicalDevice,
+    uint32_t                                    queueFamilyIndex,
+    xcb_connection_t*                           connection,
+    xcb_visualid_t                              visual_id){
+  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
+  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceXcbPresentationSupportKHR(phy, queueFamilyIndex, connection, visual_id);
+}
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+VkBool32 VKAPI_CALL PrimusVK_GetPhysicalDeviceXlibPresentationSupportKHR(
+    VkPhysicalDevice                            physicalDevice,
+    uint32_t                                    queueFamilyIndex,
+    Display*                                    dpy,
+    VisualID                                    visualID){
+  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
+  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceXlibPresentationSupportKHR(phy, queueFamilyIndex, dpy, visualID);
+}
+#endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+VkBool32 VKAPI_CALL PrimusVK_GetPhysicalDeviceWaylandPresentationSupportKHR(
+    VkPhysicalDevice                            physicalDevice,
+    uint32_t                                    queueFamilyIndex,
+    struct wl_display*                          display){
+  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
+  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceWaylandPresentationSupportKHR(phy, queueFamilyIndex, display);
+}
+#endif
 
 void VKAPI_CALL PrimusVK_QueueWaitIdle(VkQueue queue){
   scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
@@ -1301,7 +1343,15 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
   GETPROCADDR(DeviceWaitIdle);
   GETPROCADDR(QueueWaitIdle);
   GETPROCADDR(GetPhysicalDeviceQueueFamilyProperties);
-
+#ifdef VK_USE_PLATFORM_XCB_KHR
+  GETPROCADDR(GetPhysicalDeviceXcbPresentationSupportKHR);
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+  GETPROCADDR(GetPhysicalDeviceXlibPresentationSupportKHR);
+#endif
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  GETPROCADDR(GetPhysicalDeviceWaylandPresentationSupportKHR);
+#endif
 #define FORWARD(func) GETPROCADDR(func)
 #include "primus_vk_forwarding.h"
 #undef FORWARD
