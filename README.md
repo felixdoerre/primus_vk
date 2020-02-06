@@ -13,7 +13,7 @@ First you need to install `primus_vk`:
 
 To run an application with `primus_vk` prefix the command with `pvkrun` (which in the easiest case is just `ENABLE_PRIMUS_LAYER=1 optirun`). So instead of running `path/to/application`, invoke `pvkrun path/to/application` instead. You should be able to use `pvkrun` for all applications, independently of them using Vulkan, OpenGL or both.
 
-By default `primus_vk` chooses a graphics card marked as `dedicated` and one note marked as `dedicated`. If that does not fit on your scenario, you need to specify the devices used for rendering and displaying manually. You can use `PRIMUS_VK_DISPLAYID` and `PRIMUS_VK_RENDERID` and give them the `deviceID`s from `optirun env DISPLAY=:8 vulkaninfo`. That way you can force `primus_vk` to work in a variety of different scenarios (e.g. having two dedicated graphics cards and rendering on one, while displaying on the other).
+By default `primus_vk` chooses a graphics card marked as `dedicated` and one not marked as `dedicated`. If that does not fit on your scenario, you need to specify the devices used for rendering and displaying manually. You can use `PRIMUS_VK_DISPLAYID` and `PRIMUS_VK_RENDERID` and give them the `deviceID`s from `optirun env DISPLAY=:8 vulkaninfo`. That way you can force `primus_vk` to work in a variety of different scenarios (e.g. having two dedicated graphics cards and rendering on one, while displaying on the other).
 
 
 ## Idea
