@@ -14,6 +14,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersi
 class StaticInitialize {
   void *nvDriver;
   void *glLibGL;
+  void *libdl;
 public:
   VKAPI_ATTR PFN_vkVoidFunction (*instanceProcAddr) (VkInstance instance,
                                                const char* pName);
@@ -44,7 +45,8 @@ public:
       return;
     }
     typedef void* (*dlsym_fn)(void *, const char*);
-    static dlsym_fn real_dlsym = (dlsym_fn) dlsym(dlopen("libdl.so.2", RTLD_LAZY), "dlsym");
+    libdl = dlopen("libdl.so.2", RTLD_LAZY);
+    static dlsym_fn real_dlsym = (dlsym_fn) dlsym(libdl, "dlsym");
     instanceProcAddr = (decltype(instanceProcAddr)) real_dlsym(nvDriver, "vk_icdGetInstanceProcAddr");
     phyProcAddr = (decltype(phyProcAddr)) real_dlsym(nvDriver, "vk_icdGetPhysicalDeviceProcAddr");
     negotiateVersion = (decltype(negotiateVersion)) real_dlsym(nvDriver, "vk_icdNegotiateLoaderICDInterfaceVersion");
@@ -52,6 +54,8 @@ public:
   ~StaticInitialize(){
     if(nvDriver)
       dlclose(nvDriver);
+    if(libdl)
+      dlclose(libdl);
     dlclose(glLibGL);
   }
   bool IsInited(){
