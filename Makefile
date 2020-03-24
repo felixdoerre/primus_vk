@@ -1,5 +1,5 @@
 DESTDIR      ?=
-PREFIX        = $(DESTDIR)/usr/local
+PREFIX        = /usr/local
 INSTALL       = /usr/bin/install
 override INSTALL += -D
 MSGFMT        = /usr/bin/msgfmt
@@ -36,10 +36,10 @@ clean:
 	rm -f libnv_vulkan_wrapper.so libprimus_vk.so
 
 install: all
-	$(INSTALL) "libnv_vulkan_wrapper.so" "$(libdir)/libnv_vulkan_wrapper.so.1"
-	$(LN) -s "libnv_vulkan_wrapper.so.1" "$(libdir)/libnv_vulkan_wrapper.so"
-	$(INSTALL) "libprimus_vk.so"  "$(libdir)/libprimus_vk.so.1"
-	$(LN) -s "libprimus_vk.so.1" "$(libdir)/libprimus_vk.so"
-	$(INSTALL) -m644 "primus_vk.json" -t "$(datadir)/vulkan/implicit_layer.d/"
-	$(INSTALL) -m644 "nv_vulkan_wrapper.json" -t "$(datadir)/vulkan/icd.d/"
-	$(INSTALL) -m755 "pvkrun.in.sh" "$(bindir)/pvkrun"
+	$(INSTALL) "libnv_vulkan_wrapper.so" "$(DESTDIR)$(libdir)/libnv_vulkan_wrapper.so.1"
+	$(LN) -s "libnv_vulkan_wrapper.so.1" "$(DESTDIR)$(libdir)/libnv_vulkan_wrapper.so"
+	$(INSTALL) "libprimus_vk.so"  "$(DESTDIR)$(libdir)/libprimus_vk.so.1"
+	$(LN) -s "libprimus_vk.so.1" "$(DESTDIR)$(libdir)/libprimus_vk.so"
+	$(INSTALL) -m644 "primus_vk.json" -t "$(DESTDIR)$(datadir)/vulkan/implicit_layer.d/"
+	$(INSTALL) -m644 "nv_vulkan_wrapper.json" -t "$(DESTDIR)$(datadir)/vulkan/icd.d/"
+	$(INSTALL) -m755 "pvkrun.in.sh" "$(DESTDIR)$(bindir)/pvkrun"

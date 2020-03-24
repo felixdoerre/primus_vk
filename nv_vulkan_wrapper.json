@@ -1,7 +1,7 @@
 {
     "file_format_version" : "1.0.0",
     "ICD": {
-        "library_path": "libnv_vulkan_wrapper.so",
+        "library_path": "libnv_vulkan_wrapper.so.1",
         "api_version" : "1.1.84"
     }
 }
