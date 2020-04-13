@@ -1,6 +1,4 @@
 
-      FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
-    
       FORWARD(GetPhysicalDeviceSurfaceCapabilitiesKHR);
     
       FORWARD(GetPhysicalDeviceSurfaceFormatsKHR);

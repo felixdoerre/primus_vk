@@ -70,7 +70,9 @@ public:
   PFN_vkLayerDestroyDevice layerDestroyDevice;
 
   VkPhysicalDevice render = VK_NULL_HANDLE;
+  uint32_t renderQueueFamilyIndex = 0;
   VkPhysicalDevice display = VK_NULL_HANDLE;
+  uint32_t displayQueueFamilyIndex = 0;
   std::map<void*, std::shared_ptr<CreateOtherDevice>> cod = {};
 
   std::shared_ptr<std::mutex> renderQueueMutex = std::make_shared<std::mutex>();
@@ -187,6 +189,35 @@ public:
       }
       return VK_ERROR_INITIALIZATION_FAILED;
     }
+    auto ret = getQueueFamilyIndex(display, dispatchTable, &displayQueueFamilyIndex);
+    if(ret != VK_SUCCESS){
+      return ret;
+    }
+    ret = getQueueFamilyIndex(render, dispatchTable, &renderQueueFamilyIndex);
+    if(ret != VK_SUCCESS){
+      return ret;
+    }
+    return VK_SUCCESS;
+  }
+  VkResult getQueueFamilyIndex(VkPhysicalDevice device, VkLayerInstanceDispatchTable &dispatchTable, uint32_t *queueFamilyIndex) {
+    uint32_t display_queue_count = 0;
+    dispatchTable.GetPhysicalDeviceQueueFamilyProperties(device, &display_queue_count, nullptr);
+    auto displayQueueProperties = std::vector<VkQueueFamilyProperties>(display_queue_count);
+    dispatchTable.GetPhysicalDeviceQueueFamilyProperties(device, &display_queue_count, displayQueueProperties.data());
+    VkQueueFlags requiredFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
+    bool found = false;
+    while(*queueFamilyIndex < displayQueueProperties.size()){
+      auto &prop = displayQueueProperties[*queueFamilyIndex];
+      if((prop.queueFlags & requiredFlags) == requiredFlags){
+	found = true;
+	break;
+      }
+      *queueFamilyIndex++;
+    }
+    if(!found) {
+      TRACE("No fitting queue found out of: " << display_queue_count);
+      return VK_ERROR_INITIALIZATION_FAILED;
+    }
     return VK_SUCCESS;
   }
 };
@@ -247,6 +278,7 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
   FORWARD(DestroyInstance);
   FORWARD(EnumerateDeviceExtensionProperties);
   FORWARD(GetPhysicalDeviceProperties);
+  FORWARD(GetPhysicalDeviceQueueFamilyProperties);
 #undef FORWARD
 
   auto my_instance_info = InstanceInfo{*pInstance, layerCreateDevice, layerDestroyDevice};
@@ -264,6 +296,7 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
   FORWARD(GetPhysicalDeviceWaylandPresentationSupportKHR);
 #endif
+  FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
 #include "primus_vk_forwarding.h"
 #undef FORWARD
 
@@ -425,6 +458,7 @@ struct ImageWorker {
   void copyImageData(std::vector<VkSemaphore> sems);
 };
 struct PrimusSwapchain{
+  InstanceInfo &myInstance;
   std::chrono::steady_clock::time_point lastPresent = std::chrono::steady_clock::now();
   VkDevice device;
   VkQueue render_queue;
@@ -439,11 +473,11 @@ struct PrimusSwapchain{
 
   std::shared_ptr<CreateOtherDevice> cod;
   PrimusSwapchain(PrimusSwapchain &) = delete;
-  PrimusSwapchain(VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount, std::shared_ptr<CreateOtherDevice> &cod):
-    device(device), display_device(display_device), backend(backend), cod(cod){
+  PrimusSwapchain(InstanceInfo &myInstance, VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount, std::shared_ptr<CreateOtherDevice> &cod):
+    myInstance(myInstance), device(device), display_device(display_device), backend(backend), cod(cod){
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
-    device_dispatch[GetKey(display_device)].GetDeviceQueue(display_device, 0, 0, &display_queue);
+    device_dispatch[GetKey(display_device)].GetDeviceQueue(display_device, myInstance.displayQueueFamilyIndex, 0, &display_queue);
     GetKey(render_queue) = GetKey(device); // TODO, use vkSetDeviceLoaderData instead
     GetKey(display_queue) = GetKey(display_device);
 
@@ -526,15 +560,15 @@ public:
     minstance_dispatch.GetPhysicalDeviceMemoryProperties(display_dev, &display_mem);
     minstance_dispatch.GetPhysicalDeviceMemoryProperties(render_dev, &render_mem);
 
-    createDisplayDev(creator);
+    createDisplayDev(minstance_info, creator);
   }
-  void createDisplayDev(std::function<VkResult(VkDeviceCreateInfo &createInfo, VkDevice &dev)> creator){
+  void createDisplayDev(InstanceInfo &my_instance, std::function<VkResult(VkDeviceCreateInfo &createInfo, VkDevice &dev)> creator){
     VkDeviceCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 
     VkDeviceQueueCreateInfo queueInfo{};
     queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueInfo.queueFamilyIndex = 0;
+    queueInfo.queueFamilyIndex = my_instance.displayQueueFamilyIndex;
     queueInfo.queueCount = 1;
     const float defaultQueuePriority(0.0f);
     queueInfo.pQueuePriorities = &defaultQueuePriority;
@@ -558,10 +592,10 @@ class CommandBuffer {
   VkDevice device;
 public:
   VkCommandBuffer cmd;
-  CommandBuffer(VkDevice device) : device(device) {
+  CommandBuffer(VkDevice device, uint32_t queueFamilyIndex) : device(device) {
     VkCommandPoolCreateInfo poolInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = 0;
+    poolInfo.queueFamilyIndex = queueFamilyIndex;
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].CreateCommandPool(device, &poolInfo, nullptr, &commandPool));
     VkCommandBufferAllocateInfo cmdBufAllocateInfo = {.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     cmdBufAllocateInfo.commandPool = commandPool;
@@ -569,12 +603,14 @@ public:
     cmdBufAllocateInfo.commandBufferCount = 1;
 
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].AllocateCommandBuffers(device, &cmdBufAllocateInfo, &cmd));
+    GetKey(cmd) = GetKey(device);
 
     VkCommandBufferBeginInfo cmdBufInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].BeginCommandBuffer(cmd, &cmdBufInfo));
   }
   ~CommandBuffer(){
     device_dispatch[GetKey(device)].FreeCommandBuffers(device, commandPool, 1, &cmd);
+    device_dispatch[GetKey(device)].DestroyCommandPool(device, commandPool, nullptr);
   }
   void insertImageMemoryBarrier(
 			      VkImage image,
@@ -658,7 +694,7 @@ void ImageWorker::initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory
   renderCopyImage->map();
   displaySrcImage->map();
 
-  CommandBuffer cmd{swapchain.display_device};
+  CommandBuffer cmd{swapchain.display_device, swapchain.myInstance.displayQueueFamilyIndex};
   cmd.insertImageMemoryBarrier(
 			       displaySrcImage->img,
 			       0,
@@ -776,8 +812,8 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(EndCommandBuffer);
   //FETCH(EnumeratePhysicalDevices);
   FETCH(FreeCommandBuffers);
+  FETCH(DestroyCommandPool);
   //FETCH(GetPhysicalDeviceMemoryProperties);
-  //FETCH(GetPhysicalDeviceQueueFamilyProperties);
   FETCH(QueueSubmit);
   FETCH(DeviceWaitIdle);
   FETCH(QueueWaitIdle);
@@ -839,7 +875,7 @@ VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapcha
     return rc;
   }
 
-  PrimusSwapchain *ch = new PrimusSwapchain(render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount, my_instance.cod[GetKey(device)]);
+  PrimusSwapchain *ch = new PrimusSwapchain(my_instance, render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount, my_instance.cod[GetKey(device)]);
 
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
@@ -875,12 +911,15 @@ const auto primus_start = std::chrono::steady_clock::now();
 VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex) {
   TRACE_PROFILING_EVENT(-1, "Acquire starting");
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(pAcquireInfo->swapchain);
-
+  auto timeout = pAcquireInfo->timeout;
+  if(timeout == UINT64_MAX ) {
+    timeout = 1000L * 1000 * 1000 * 60; // 1 minute
+  }
   VkResult res;
   {
     Fence myfence{ch->display_device};
 
-    res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, pAcquireInfo->timeout, VK_NULL_HANDLE, myfence.fence, pImageIndex);
+    res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, timeout, VK_NULL_HANDLE, myfence.fence, pImageIndex);
     TRACE_PROFILING_EVENT(*pImageIndex, "got image");
 
     myfence.await();
@@ -940,7 +979,7 @@ void ImageWorker::createCommandBuffers(){
   {
     auto cpyImage = render_copy_image;
     auto srcImage = render_image->img;
-    render_copy_command = std::make_shared<CommandBuffer>(swapchain. device);
+    render_copy_command = std::make_shared<CommandBuffer>(swapchain.device, swapchain.myInstance.renderQueueFamilyIndex);
     CommandBuffer &cmd = *render_copy_command;
     cmd.insertImageMemoryBarrier(
 	cpyImage->img,
@@ -974,7 +1013,7 @@ void ImageWorker::createCommandBuffers(){
   }
 
   {
-    display_command = std::make_shared<CommandBuffer>(swapchain.display_device);
+    display_command = std::make_shared<CommandBuffer>(swapchain.display_device, swapchain.myInstance.displayQueueFamilyIndex);
     CommandBuffer &cmd = *display_command;
     cmd.insertImageMemoryBarrier(
 	display_src_image->img,
@@ -1141,14 +1180,24 @@ void VKAPI_CALL PrimusVK_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice
   VkPhysicalDevice phy = physicalDevice;
   instance_dispatch[GetKey(phy)].GetPhysicalDeviceQueueFamilyProperties(phy, pQueueFamilyPropertyCount, pQueueFamilyProperties);
 }
+VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
+    VkPhysicalDevice physicalDevice,
+    uint32_t queueFamilyIndex,
+    VkSurfaceKHR surface,
+    VkBool32* pSupported) {
+  auto &instance = instance_info[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = instance.display;
+  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, instance.displayQueueFamilyIndex, surface, pSupported);
+}
 #ifdef VK_USE_PLATFORM_XCB_KHR
 VkBool32 VKAPI_CALL PrimusVK_GetPhysicalDeviceXcbPresentationSupportKHR(
     VkPhysicalDevice                            physicalDevice,
     uint32_t                                    queueFamilyIndex,
     xcb_connection_t*                           connection,
     xcb_visualid_t                              visual_id){
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceXcbPresentationSupportKHR(phy, queueFamilyIndex, connection, visual_id);
+  auto &instance = instance_info[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = instance.display;
+  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceXcbPresentationSupportKHR(phy, instance.displayQueueFamilyIndex, connection, visual_id);
 }
 #endif
 #ifdef VK_USE_PLATFORM_XLIB_KHR
@@ -1157,8 +1206,9 @@ VkBool32 VKAPI_CALL PrimusVK_GetPhysicalDeviceXlibPresentationSupportKHR(
     uint32_t                                    queueFamilyIndex,
     Display*                                    dpy,
     VisualID                                    visualID){
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceXlibPresentationSupportKHR(phy, queueFamilyIndex, dpy, visualID);
+  auto &instance = instance_info[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = instance.display;
+  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceXlibPresentationSupportKHR(phy, instance.displayQueueFamilyIndex, dpy, visualID);
 }
 #endif
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
@@ -1166,8 +1216,9 @@ VkBool32 VKAPI_CALL PrimusVK_GetPhysicalDeviceWaylandPresentationSupportKHR(
     VkPhysicalDevice                            physicalDevice,
     uint32_t                                    queueFamilyIndex,
     struct wl_display*                          display){
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceWaylandPresentationSupportKHR(phy, queueFamilyIndex, display);
+  auto &instance = instance_info[GetKey(physicalDevice)];
+  VkPhysicalDevice phy = instance.display;
+  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceWaylandPresentationSupportKHR(phy, instance.displayQueueFamilyIndex, display);
 }
 #endif
 
@@ -1304,6 +1355,7 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetDeviceProcAddr(VkDevic
   GETPROCADDR(DeviceWaitIdle);
   GETPROCADDR(QueueWaitIdle);
 #define FORWARD(func) GETPROCADDR(func)
+  FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
 #include "primus_vk_forwarding.h"
 #undef FORWARD
   {
@@ -1353,6 +1405,7 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
   GETPROCADDR(GetPhysicalDeviceWaylandPresentationSupportKHR);
 #endif
 #define FORWARD(func) GETPROCADDR(func)
+  FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
 #include "primus_vk_forwarding.h"
 #undef FORWARD
   {

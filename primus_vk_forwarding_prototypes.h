@@ -1,12 +1,4 @@
-VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
-    VkPhysicalDevice physicalDevice,
-    uint32_t queueFamilyIndex,
-    VkSurfaceKHR surface,
-    VkBool32* pSupported) {
-  VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceSupportKHR(phy, queueFamilyIndex, surface, pSupported);
-}	    
-    VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(
+VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(
     VkPhysicalDevice physicalDevice,
     VkSurfaceKHR surface,
     VkSurfaceCapabilitiesKHR* pSurfaceCapabilities) {
@@ -59,3 +51,4 @@ VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceSupportKHR(
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
   return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormats2KHR(phy, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
 }	    
+    
