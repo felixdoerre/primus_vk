@@ -10,6 +10,11 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersi
 #ifndef NV_DRIVER_PATH
 #define NV_DRIVER_PATH "/usr/lib/x86_64-linux-gnu/nvidia/current/libGL.so.1"
 #endif
+#ifndef NV_BUMBLEBEE_DISPLAY
+#define NV_BUMBLEBEE_DISPLAY ":8"
+#endif
+
+typedef void* dlsym_fn(void *, const char*);
 
 class StaticInitialize {
   void *nvDriver;
@@ -44,9 +49,8 @@ public:
       std::cerr << "PrimusVK: ERROR! Nvidia driver could not be loaded from '" NV_DRIVER_PATH "'.\n";
       return;
     }
-    typedef void* (*dlsym_fn)(void *, const char*);
     libdl = dlopen("libdl.so.2", RTLD_LAZY);
-    static dlsym_fn real_dlsym = (dlsym_fn) dlsym(libdl, "dlsym");
+    static dlsym_fn *real_dlsym = (dlsym_fn*) dlsym(libdl, "dlsym");
     instanceProcAddr = (decltype(instanceProcAddr)) real_dlsym(nvDriver, "vk_icdGetInstanceProcAddr");
     phyProcAddr = (decltype(phyProcAddr)) real_dlsym(nvDriver, "vk_icdGetPhysicalDeviceProcAddr");
     negotiateVersion = (decltype(negotiateVersion)) real_dlsym(nvDriver, "vk_icdNegotiateLoaderICDInterfaceVersion");
@@ -85,7 +89,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersi
   }
   char *prev = getenv("DISPLAY");
   std::string old{prev};
-  setenv("DISPLAY", ":8", 1);
+  setenv("DISPLAY", NV_BUMBLEBEE_DISPLAY, 1);
   auto res = init.negotiateVersion(pSupportedVersion);
   setenv("DISPLAY",old.c_str(), 1);
   return res;
