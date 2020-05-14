@@ -212,7 +212,7 @@ public:
 	found = true;
 	break;
       }
-      *queueFamilyIndex++;
+      (*queueFamilyIndex)++;
     }
     if(!found) {
       TRACE("No fitting queue found out of: " << display_queue_count);
