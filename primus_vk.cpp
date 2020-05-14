@@ -272,8 +272,8 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
 
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerInstanceDispatchTable dispatchTable;
+  dispatchTable.GetInstanceProcAddr = gpa;
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
-  FORWARD(GetInstanceProcAddr);
   FORWARD(EnumeratePhysicalDevices);
   FORWARD(DestroyInstance);
   FORWARD(EnumerateDeviceExtensionProperties);
@@ -777,8 +777,8 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   TRACE("fetching dispatch for " << GetKey(*pDevice));
   // fetch our own dispatch table for the functions we need, into the next layer
   VkLayerDispatchTable dispatchTable;
+  dispatchTable.GetDeviceProcAddr = gdpa;
 #define FETCH(x) dispatchTable.x = (PFN_vk##x) gdpa(*pDevice, "vk" #x);
-  FETCH(GetDeviceProcAddr);
   FETCH(DestroyDevice);
   FETCH(BeginCommandBuffer);
   FETCH(CmdDraw);
