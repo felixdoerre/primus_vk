@@ -315,10 +315,10 @@ void VKAPI_CALL PrimusVK_DestroyInstance(VkInstance instance, const VkAllocation
 {
   scoped_lock l(global_lock);
 
+  auto instance_key = GetKey(instance);
   instance_dispatch[GetKey(instance)].DestroyInstance(instance, pAllocator);
-
-  instance_dispatch.erase(GetKey(instance));
-  instance_info.erase(GetKey(instance));
+  instance_dispatch.erase(instance_key);
+  instance_info.erase(instance_key);
 }
 
 struct FramebufferImage;
@@ -837,11 +837,13 @@ void VKAPI_CALL PrimusVK_DestroyDevice(VkDevice device, const VkAllocationCallba
   scoped_lock l(global_lock);
   auto &my_instance = *device_instance_info[GetKey(device)];
   auto &display_device = my_instance.cod[GetKey(device)]->display_gpu;
+  auto device_key = GetKey(device);
+  auto display_device_key = GetKey(display_device);
   my_instance.layerDestroyDevice(display_device, nullptr, device_dispatch[GetKey(display_device)].DestroyDevice);
   device_dispatch[GetKey(device)].DestroyDevice(device, pAllocator);
-  my_instance.cod.erase(GetKey(device));
-  device_dispatch.erase(GetKey(device));
-  device_dispatch.erase(GetKey(display_device));
+  my_instance.cod.erase(device_key);
+  device_dispatch.erase(device_key);
+  device_dispatch.erase(display_device_key);
 }
 
 VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
@@ -913,7 +915,10 @@ VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcqui
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(pAcquireInfo->swapchain);
   auto timeout = pAcquireInfo->timeout;
   if(timeout == UINT64_MAX ) {
-    timeout = 1000L * 1000 * 1000 * 60; // 1 minute
+    // make the assignment in two steps to
+    // keep the compiler on 32-bit happy
+    timeout = 1000;
+    timeout *= 1000L * 1000 * 60; // 1 minute
   }
   VkResult res;
   {
