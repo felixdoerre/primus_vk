@@ -473,7 +473,7 @@ struct PrimusSwapchain{
 
   std::shared_ptr<CreateOtherDevice> cod;
   PrimusSwapchain(PrimusSwapchain &) = delete;
-  PrimusSwapchain(InstanceInfo &myInstance, VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, uint32_t imageCount, std::shared_ptr<CreateOtherDevice> &cod):
+  PrimusSwapchain(InstanceInfo &myInstance, VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, std::shared_ptr<CreateOtherDevice> &cod):
     myInstance(myInstance), device(device), display_device(display_device), backend(backend), cod(cod){
     // TODO automatically find correct queue and not choose 0 forcibly
     device_dispatch[GetKey(device)].GetDeviceQueue(device, 0, 0, &render_queue);
@@ -491,7 +491,7 @@ struct PrimusSwapchain{
     imgSize = pCreateInfo->imageExtent;
 
     auto image_memory_types = getImageMemories();
-    for(uint32_t i = 0; i < imageCount; i++){
+    for(uint32_t i = 0; i < image_count; i++){
       images.emplace_back(*this, display_images[i], *pCreateInfo, image_memory_types);
     }
 
@@ -499,7 +499,7 @@ struct PrimusSwapchain{
     size_t thread_count = 1;
     char *m_env = getenv("PRIMUS_VK_MULTITHREADING");
     if(m_env == nullptr || std::string{m_env} != "1"){
-      thread_count = imageCount;
+      thread_count = image_count;
     }
     threads.resize(thread_count);
     for(auto &thread: threads){
@@ -877,7 +877,7 @@ VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapcha
     return rc;
   }
 
-  PrimusSwapchain *ch = new PrimusSwapchain(my_instance, render_gpu, display_gpu, backend, pCreateInfo, info2.minImageCount, my_instance.cod[GetKey(device)]);
+  PrimusSwapchain *ch = new PrimusSwapchain(my_instance, render_gpu, display_gpu, backend, pCreateInfo, my_instance.cod[GetKey(device)]);
 
   *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
