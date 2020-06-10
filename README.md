@@ -8,7 +8,8 @@ It is basically the same as Primus for OpenGL (https://github.com/amonakov/primu
 
 First you need to install `primus_vk`:
  * On Archlinux there are official packages ([for 64-bit games](https://www.archlinux.org/packages/community/x86_64/primus_vk/), [for 32-bit games](https://www.archlinux.org/packages/multilib/x86_64/lib32-primus_vk/)).
- * On Debian (from bullseye on) you should use `primus-vk-nvidia` (which recommends `primus-vk-nvidia-i386` for 32-bit games), which already is preconfigured for the Nvidia dedicated + Intel integrated graphics setup. When you have a different setup, you should install just `primus-vk` (which installs only the bare `primus_vk`-library and neither graphics drivers not the `pvkrun`-runner), select the Vulkan drivers you need yourself and then invoke `primus_vk` manually.
+ * On Debian (from bullseye on) you should use `primus-vk-nvidia` (which recommends also the 32-bit variants of those packages for 32-bit games), which already is preconfigured for the Nvidia dedicated + Intel integrated graphics setup. When you have a different setup, you should install just `primus-vk` (which installs only the bare `primus_vk`-library and no graphics drivers), and install the Vulkan drivers, you need manually.
+ * For Fedora there are [unofficial packages](https://copr.fedorainfracloud.org/coprs/yura/primus-vk/).
  * For other distributions you will likely need to [manually install](#installation) `primus_vk`.
 
 To run an application with `primus_vk` prefix the command with `pvkrun` (which in the easiest case is just `ENABLE_PRIMUS_LAYER=1 optirun`). So instead of running `path/to/application`, invoke `pvkrun path/to/application` instead. You should be able to use `pvkrun` for all applications, independently of them using Vulkan, OpenGL or both.
@@ -77,7 +78,7 @@ Notes for running on Arch Linux:
 
 ### RPM package
 
-Leonid Maksymchuk built RPM packaging scripts for primus-vk which can be found in his [repository](https://github.com/leonmaxx/primus-vk-rpm).
+Leonid Maksymchuk built RPM packaging scripts for primus-vk which can be found in his [repository](https://github.com/leonmaxx/primus-vk-rpm). RPMs for Fedora >= 30 are available [here](https://copr.fedorainfracloud.org/coprs/yura/primus-vk/)
 
 ## Credits
 
