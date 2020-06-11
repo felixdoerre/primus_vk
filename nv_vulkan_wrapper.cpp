@@ -8,7 +8,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersi
 
 
 #ifndef NV_DRIVER_PATH
-#define NV_DRIVER_PATH "/usr/lib/x86_64-linux-gnu/nvidia/current/libGL.so.1"
+#define NV_DRIVER_PATH "/usr/lib/x86_64-linux-gnu/nvidia/libGL.so.1:libGLX_nvidia.so.0"
 #endif
 #ifndef NV_BUMBLEBEE_DISPLAY
 #define NV_BUMBLEBEE_DISPLAY ":8"
@@ -49,6 +49,9 @@ public:
       return;
     }
     void *libdl = dlopen("libdl.so.2", RTLD_LAZY);
+    // We explicitly want the real dlsym from libdl.so.2 because there are LD_PRELOAD libraries
+    // that override dlsym and mess with the return values. We explicitly ask for the real
+    // dlsym function, just to be safe.
     dlsym_fn *real_dlsym = (dlsym_fn*) dlsym(libdl, "dlsym");
     instanceProcAddr = (decltype(instanceProcAddr)) real_dlsym(nvDriver, "vk_icdGetInstanceProcAddr");
     phyProcAddr = (decltype(phyProcAddr)) real_dlsym(nvDriver, "vk_icdGetPhysicalDeviceProcAddr");

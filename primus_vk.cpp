@@ -915,10 +915,7 @@ VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcqui
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(pAcquireInfo->swapchain);
   auto timeout = pAcquireInfo->timeout;
   if(timeout == UINT64_MAX ) {
-    // make the assignment in two steps to
-    // keep the compiler on 32-bit happy
-    timeout = 1000;
-    timeout *= 1000L * 1000 * 60; // 1 minute
+    timeout = uint64_t(1000) * 1000 * 1000 * 60; // 1 minute
   }
   VkResult res;
   {
