@@ -939,13 +939,14 @@ VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcqui
   return res;
 }
 VkResult VKAPI_CALL PrimusVK_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
-  auto acquireInfo = VkAcquireNextImageInfoKHR{
-    .sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
-    .swapchain = swapchain,
-    .timeout = timeout,
-    .semaphore = semaphore,
-    .fence = fence
-  };
+  auto acquireInfo = VkAcquireNextImageInfoKHR{};
+
+  acquireInfo.sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR;
+  acquireInfo.swapchain = swapchain;
+  acquireInfo.timeout = timeout;
+  acquireInfo.semaphore = semaphore;
+  acquireInfo.fence = fence;
+
   return PrimusVK_AcquireNextImage2KHR(device, &acquireInfo, pImageIndex);
 }
 VkResult VKAPI_CALL PrimusVK_GetSwapchainStatusKHR(VkDevice device, VkSwapchainKHR swapchain){
