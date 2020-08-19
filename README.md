@@ -25,7 +25,7 @@ When the application wants to swap frames, copy the image over to the integrated
 ## Why do we need to copy the Image so often?
 As far as I can tell `VkImage` (and `VkMemory`) objects may not be shared beween different physical devices. So there is not really another way than using `memcpy` on the images when memmapped into main memory.
 
-Additinonally, only images with `VK_IMAGE_TILING_OPTIMAL` can be rendered to and presentend and only images with `VK_IMAGE_TILING_LINEAR` can be mapped to main memory to be copied. So I see no better way than copying the image 3 times from render target to display. On my machine the `memcpy` from an external device was pretty clearly the bottleneck. So it is not really the copying of the image, but the transfer from rendering GPU into main memory.
+Additionally, only images with `VK_IMAGE_TILING_OPTIMAL` can be rendered to and presentend and only images with `VK_IMAGE_TILING_LINEAR` can be mapped to main memory to be copied. So I see no better way than copying the image 3 times from render target to display. On my machine the `memcpy` from an external device was pretty clearly the bottleneck. So it is not really the copying of the image, but the transfer from rendering GPU into main memory.
 
 An idea might be to use `VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT` to map one device's memory and use that directly on the other device (or import host-allocated memory on both devices). However that is not implemented yet.
 
@@ -73,7 +73,7 @@ Copy `primus_vk.json` to `/usr/share/vulkan/implicit_layer.d` and adjust the pat
 
 Notes for running on Arch Linux:
 
-* nv_vulkan_wrapper.cpp: Change nvDiver path to `/usr/lib/libGLX_nvidia.so.0`
+* nv_vulkan_wrapper.cpp: Change nvDriver path to `/usr/lib/libGLX_nvidia.so.0`
 * primus_vk.cpp: add: `#include "vk_layer_utils.h"` (on Debian the contents are included in some other header and there is no "vk_layer_utils.h")
 
 ### RPM package
