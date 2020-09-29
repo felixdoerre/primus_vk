@@ -4,7 +4,7 @@
     "name": "VK_LAYER_PRIMUS_PrimusVK",
     "type": "GLOBAL",
     "library_path": "libprimus_vk.so.1",
-    "api_version": "1.1.0",
+    "api_version": "1.2.0",
     "implementation_version": "1",
     "description": "Primus-vk - https://github.com/felixdoerre/primus_vk",
     "functions": {
