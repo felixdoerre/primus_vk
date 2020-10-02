@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+  <head>
+    <title>PrimusVK: Profiling</title>
+    <meta charset='UTF-8'>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script>
+      const prefix = "PrimusVK-profiling: ";
+      function loadData(){
+	  d3.text( "trace.txt").then(function(data) {
+	      let lines = data.split("\n").filter((line) => line.startsWith(prefix)).map((line) => line.substring(prefix.length).split(" ")).map((line)=>line.slice(0,2).concat([line.slice(2).join(" ")]));
+	      for(let i=0; i < lines.length; i++){
+		  lines[i][3] = i;
+	      }
+	      const len = lines.length;
+	      lines = lines.slice(len-100,len);
+	      let min=lines[0][1];
+	      var svg = d3.select("svg");
+	      svg.attr("width","1000%");
+	      svg.attr("height",800);
+	      const hashCount = 6;
+	      const color = d3.scaleOrdinal(d3.schemeCategory10);
+	      svg.selectAll("text")
+		  .data(lines)
+		  .enter().append("text")
+		  .attr("y", elem => {
+		      if(elem[0] == -1){
+			  return 60;
+		      }
+		      return 100 + 20*((hashCount + 1)*elem[0] + (elem[3]%hashCount));
+		  })
+		  .attr("x", elem => Math.floor((elem[1]-min)/50000))
+		  .style("fill", elem => color(elem[2]))
+		  .text((elem) => elem[2] );
+	      svg.selectAll("line").data([0,1,2])
+		  .enter().append("line")
+		  .attr("x1", 0)
+		  .attr("y1", elem => 80 + 20*(hashCount+1)*elem)
+		  .attr("x2", "100%")
+		  .attr("y2", elem => 80 + 20*(hashCount+1)*elem)
+		  .attr("stroke", "black");
+	  }).catch(function(except){
+	      console.log(except);
+	  });
+      }
+    </script>
+  </head>
+  <body onLoad="loadData()">
+    <svg id='render'/>
+  </body>
+</html>
