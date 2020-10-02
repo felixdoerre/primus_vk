@@ -455,7 +455,7 @@ struct ImageWorker {
   ~ImageWorker();
   void initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types, const VkSwapchainCreateInfoKHR &createInfo);
   void createCommandBuffers();
-  void copyImageData(std::vector<VkSemaphore> sems);
+  void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
 };
 struct PrimusSwapchain{
   InstanceInfo &myInstance;
@@ -1053,7 +1053,7 @@ void PrimusSwapchain::storeImage(uint32_t index, VkQueue queue, std::vector<VkSe
   images[index].render_copy_command->submit(queue, notify.fence, wait_on);
 }
 
-void ImageWorker::copyImageData(std::vector<VkSemaphore> sems){
+void ImageWorker::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
   {
     auto rendered = render_copy_image->getMapped();
     auto display = display_src_image->getMapped();
@@ -1117,7 +1117,7 @@ void PrimusSwapchain::present(const QueueItem &workItem){
     const auto index = workItem.imgIndex;
     images[index].render_copy_fence.await();
     images[index].render_copy_fence.reset();
-    images[index].copyImageData({images[index].display_semaphore.sem});
+    images[index].copyImageData(index, {images[index].display_semaphore.sem});
 
     TRACE_PROFILING_EVENT(index, "copy queued");
 
