@@ -455,7 +455,7 @@ struct ImageWorker {
   ~ImageWorker();
   void initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types, const VkSwapchainCreateInfoKHR &createInfo);
   void createCommandBuffers();
-  void copyImageData(std::vector<VkSemaphore> sems);
+  void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
 };
 struct PrimusSwapchain{
   InstanceInfo &myInstance;
@@ -955,21 +955,22 @@ VkResult VKAPI_CALL PrimusVK_GetSwapchainStatusKHR(VkDevice device, VkSwapchainK
 }
 
 std::tuple<ssize_t, ssize_t, ssize_t> PrimusSwapchain::getImageMemories(){
-  VkMemoryPropertyFlags host_mem = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-  VkMemoryPropertyFlags local_mem = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+  VkMemoryPropertyFlags render_host_mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+  VkMemoryPropertyFlags display_host_mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags local_mem_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
   ssize_t render_host_mem = -1;
   ssize_t render_local_mem = -1;
   ssize_t display_host_mem = -1;
   for(size_t j=0; j < cod->render_mem.memoryTypeCount; j++){
-    if ( render_host_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & host_mem ) == host_mem ) {
+    if ( render_host_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & render_host_mem_flags ) == render_host_mem_flags ) {
       render_host_mem = j;
     }
-    if ( render_local_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & local_mem ) == local_mem ) {
+    if ( render_local_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & local_mem_flags ) == local_mem_flags ) {
       render_local_mem = j;
     }
   }
   for(size_t j=0; j < cod->display_mem.memoryTypeCount; j++){
-    if ( display_host_mem == -1 && ( cod->display_mem.memoryTypes[j].propertyFlags & host_mem ) == host_mem ) {
+    if ( display_host_mem == -1 && ( cod->display_mem.memoryTypes[j].propertyFlags & display_host_mem_flags ) == display_host_mem_flags ) {
       display_host_mem = j;
     }
   }
@@ -1052,7 +1053,7 @@ void PrimusSwapchain::storeImage(uint32_t index, VkQueue queue, std::vector<VkSe
   images[index].render_copy_command->submit(queue, notify.fence, wait_on);
 }
 
-void ImageWorker::copyImageData(std::vector<VkSemaphore> sems){
+void ImageWorker::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
   {
     auto rendered = render_copy_image->getMapped();
     auto display = display_src_image->getMapped();
@@ -1116,7 +1117,7 @@ void PrimusSwapchain::present(const QueueItem &workItem){
     const auto index = workItem.imgIndex;
     images[index].render_copy_fence.await();
     images[index].render_copy_fence.reset();
-    images[index].copyImageData({images[index].display_semaphore.sem});
+    images[index].copyImageData(index, {images[index].display_semaphore.sem});
 
     TRACE_PROFILING_EVENT(index, "copy queued");
 
