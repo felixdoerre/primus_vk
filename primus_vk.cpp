@@ -828,6 +828,8 @@ VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *
   FETCH(CreateSemaphore);
   FETCH(DestroySemaphore);
 
+  FETCH(InvalidateMappedMemoryRanges);
+
 #undef FETCH
   return dispatchTable;
 }
@@ -1066,6 +1068,15 @@ void ImageWorker::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
       throw std::runtime_error("Layouts don't match at all");
     }
     TRACE_PROFILING_EVENT(index, "memcpy start");
+    VkMappedMemoryRange rendered_range {
+      .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+      .pNext = VK_NULL_HANDLE,
+      .memory = render_copy_image->mem,
+      .offset = 0,
+      .size = VK_WHOLE_SIZE
+    };
+    VK_CHECK_RESULT(device_dispatch[GetKey(swapchain.device)].InvalidateMappedMemoryRanges(swapchain.device, 1, &rendered_range));
+    
     if(rendered_layout.rowPitch == display_layout.rowPitch){
       std::memcpy(display_start, rendered_start, rendered_layout.size);
     }else{
