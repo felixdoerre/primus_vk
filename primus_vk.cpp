@@ -925,7 +925,9 @@ VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcqui
 
     res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, timeout, VK_NULL_HANDLE, myfence.fence, pImageIndex);
     TRACE_PROFILING_EVENT(*pImageIndex, "got image");
-
+    if(res != VK_SUCCESS) {
+      return res;
+    }
     myfence.await();
   }
   VkSubmitInfo qsi{};
