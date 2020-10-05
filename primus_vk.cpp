@@ -337,7 +337,7 @@ struct FramebufferImage {
 
   std::shared_ptr<MappedMemory> mapped;
   FramebufferImage(FramebufferImage &) = delete;
-  FramebufferImage(VkDevice device, VkExtent2D size, VkImageTiling tiling, VkImageUsageFlags usage, VkFormat format, int memoryTypeIndex): device(device){
+  FramebufferImage(VkDevice device, VkExtent2D size, VkImageTiling tiling, VkImageUsageFlags usage, VkFormat format, std::function<uint32_t(uint32_t memory_type_bits)> memoryTypeIndex): device(device){
     TRACE("Creating image: " << size.width << "x" << size.height);
     VkImageCreateInfo imageCreateCI {};
     imageCreateCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -358,7 +358,7 @@ struct FramebufferImage {
     VkMemoryAllocateInfo memAllocInfo {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     device_dispatch[GetKey(device)].GetImageMemoryRequirements(device, img, &memRequirements);
     memAllocInfo.allocationSize = memRequirements.size;
-    memAllocInfo.memoryTypeIndex = memoryTypeIndex;
+    memAllocInfo.memoryTypeIndex = memoryTypeIndex(memRequirements.memoryTypeBits);
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].AllocateMemory(device, &memAllocInfo, nullptr, &mem));
     VK_CHECK_RESULT(device_dispatch[GetKey(device)].BindImageMemory(device, img, mem, 0));
   }
@@ -435,6 +435,26 @@ public:
     }
   }
 };
+enum class ImageType : int{
+  RENDER_TARGET_IMAGE,
+  RENDER_COPY_IMAGE,
+  DISPLAY_IMAGE,
+  IMAGE_TYPE_COUNT
+};
+std::ostream &operator<<( std::ostream &output, const ImageType &type ) {
+  switch(type){
+  case ImageType::RENDER_TARGET_IMAGE:
+    output << "Render Target Image";
+    break;
+  case ImageType::RENDER_COPY_IMAGE:
+    output << "Render Copy Image";
+    break;
+  case ImageType::DISPLAY_IMAGE:
+    output << "Display Image";
+    break;
+  }
+  return output;
+}
 struct PrimusSwapchain;
 struct ImageWorker {
   PrimusSwapchain &swapchain;
@@ -450,10 +470,10 @@ struct ImageWorker {
   std::shared_ptr<CommandBuffer> display_command;
   std::unique_ptr<Fence> display_command_fence;
 
-  ImageWorker(PrimusSwapchain &swapchain, VkImage display_image, const VkSwapchainCreateInfoKHR &createInfo, std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types);
+  ImageWorker(PrimusSwapchain &swapchain, VkImage display_image, const VkSwapchainCreateInfoKHR &createInfo);
   ImageWorker(ImageWorker &&other) = default;
   ~ImageWorker();
-  void initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types, const VkSwapchainCreateInfoKHR &createInfo);
+  void initImages( const VkSwapchainCreateInfoKHR &createInfo);
   void createCommandBuffers();
   void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
 };
@@ -490,9 +510,8 @@ struct PrimusSwapchain{
 
     imgSize = pCreateInfo->imageExtent;
 
-    auto image_memory_types = getImageMemories();
     for(uint32_t i = 0; i < image_count; i++){
-      images.emplace_back(*this, display_images[i], *pCreateInfo, image_memory_types);
+      images.emplace_back(*this, display_images[i], *pCreateInfo);
     }
 
     TRACE("Creating a Swapchain thread.");
@@ -508,7 +527,7 @@ struct PrimusSwapchain{
     }
   }
 
-  std::tuple<ssize_t, ssize_t, ssize_t> getImageMemories();
+  uint32_t getImageMemory(ImageType type, uint32_t memory_type_bits);
 
   void storeImage(uint32_t index, VkQueue queue, std::vector<VkSemaphore> wait_on, Fence &notify);
 
@@ -529,8 +548,8 @@ struct PrimusSwapchain{
   void stop();
 };
 
-ImageWorker::ImageWorker(PrimusSwapchain &swapchain, VkImage display_image, const VkSwapchainCreateInfoKHR &createInfo, std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types): swapchain(swapchain), render_copy_fence(swapchain.device), display_semaphore(swapchain.display_device), display_image(display_image){
-  initImages(image_memory_types, createInfo);
+ImageWorker::ImageWorker(PrimusSwapchain &swapchain, VkImage display_image, const VkSwapchainCreateInfoKHR &createInfo): swapchain(swapchain), render_copy_fence(swapchain.device), display_semaphore(swapchain.display_device), display_image(display_image){
+  initImages(createInfo);
   createCommandBuffers();
 }
 ImageWorker::~ImageWorker(){
@@ -675,9 +694,7 @@ public:
   }
 };
 
-void ImageWorker::initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory_types, const VkSwapchainCreateInfoKHR &createInfo){
-  ssize_t render_local_mem, render_host_mem, display_host_mem;
-  std::tie( render_local_mem, render_host_mem, display_host_mem) = image_memory_types;
+void ImageWorker::initImages( const VkSwapchainCreateInfoKHR &createInfo){
   auto imgSize = createInfo.imageExtent;
   auto format = createInfo.imageFormat;
     
@@ -685,11 +702,14 @@ void ImageWorker::initImages( std::tuple<ssize_t, ssize_t, ssize_t> image_memory
   auto &renderCopyImage = render_copy_image;
   auto &displaySrcImage = display_src_image;
   renderImage = std::make_shared<FramebufferImage>(swapchain.device, imgSize,
-						     VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT,format, render_local_mem);
+    VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, format,
+    [this](uint32_t memoryTypeBits){ return swapchain.getImageMemory(ImageType::RENDER_TARGET_IMAGE, memoryTypeBits); });
   renderCopyImage = std::make_shared<FramebufferImage>(swapchain.device, imgSize,
-							 VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_DST_BIT,format, render_host_mem);
+    VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_DST_BIT, format,
+    [this](uint32_t memoryTypeBits){ return swapchain.getImageMemory(ImageType::RENDER_COPY_IMAGE, memoryTypeBits); });
   displaySrcImage = std::make_shared<FramebufferImage>(swapchain.display_device, imgSize,
-							 VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |/**/ VK_IMAGE_USAGE_TRANSFER_SRC_BIT,format, display_host_mem);
+    VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, format,
+    [this](uint32_t memoryTypeBits){ return swapchain.getImageMemory(ImageType::DISPLAY_IMAGE, memoryTypeBits); });
 
   renderCopyImage->map();
   displaySrcImage->map();
@@ -878,10 +898,13 @@ VkResult VKAPI_CALL PrimusVK_CreateSwapchainKHR(VkDevice device, const VkSwapcha
   if(rc != VK_SUCCESS){
     return rc;
   }
+  try {
+    PrimusSwapchain *ch = new PrimusSwapchain(my_instance, render_gpu, display_gpu, backend, pCreateInfo, my_instance.cod[GetKey(device)]);
+    *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
+  }catch(const std::exception &e){
+    return VK_ERROR_UNKNOWN;
+  }
 
-  PrimusSwapchain *ch = new PrimusSwapchain(my_instance, render_gpu, display_gpu, backend, pCreateInfo, my_instance.cod[GetKey(device)]);
-
-  *pSwapchain = reinterpret_cast<VkSwapchainKHR>(ch);
 
 
   return rc;
@@ -958,29 +981,43 @@ VkResult VKAPI_CALL PrimusVK_GetSwapchainStatusKHR(VkDevice device, VkSwapchainK
   return device_dispatch[GetKey(ch->display_device)].GetSwapchainStatusKHR(device, ch->backend);
 }
 
-std::tuple<ssize_t, ssize_t, ssize_t> PrimusSwapchain::getImageMemories(){
-  VkMemoryPropertyFlags render_host_mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-  VkMemoryPropertyFlags display_host_mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-  VkMemoryPropertyFlags local_mem_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-  ssize_t render_host_mem = -1;
-  ssize_t render_local_mem = -1;
-  ssize_t display_host_mem = -1;
-  for(size_t j=0; j < cod->render_mem.memoryTypeCount; j++){
-    if ( render_host_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & render_host_mem_flags ) == render_host_mem_flags ) {
-      render_host_mem = j;
-    }
-    if ( render_local_mem == -1 && ( cod->render_mem.memoryTypes[j].propertyFlags & local_mem_flags ) == local_mem_flags ) {
-      render_local_mem = j;
+uint32_t PrimusSwapchain::getImageMemory(ImageType image_type, uint32_t memoryTypeBits){
+  const VkPhysicalDeviceMemoryProperties *mem_props = &cod->render_mem;
+  std::vector<std::pair<VkMemoryPropertyFlags, VkMemoryPropertyFlags>> propertyPreferences;
+  switch(image_type){
+  case ImageType::RENDER_TARGET_IMAGE:
+    propertyPreferences = {
+      {VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT},
+      {VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0}
+    };
+    break;
+  case ImageType::RENDER_COPY_IMAGE:
+    propertyPreferences = {
+      {VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT},
+      {VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, 0},
+      {VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, 0}
+    };
+    break;
+  case ImageType::DISPLAY_IMAGE:
+    mem_props = &cod->display_mem;
+    propertyPreferences = {
+      {VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0}
+    };
+    break;
+  }
+  for( const auto &requested : propertyPreferences ){
+    for(size_t j = 0; j < mem_props->memoryTypeCount; j++){
+      if( (memoryTypeBits & (1 << j)) == 0) {
+	continue;
+      }
+      auto flags = mem_props->memoryTypes[j].propertyFlags;
+      if((flags & requested.first) == requested.first && (flags & requested.second) == 0) {
+	return j;
+      }
     }
   }
-  for(size_t j=0; j < cod->display_mem.memoryTypeCount; j++){
-    if ( display_host_mem == -1 && ( cod->display_mem.memoryTypes[j].propertyFlags & display_host_mem_flags ) == display_host_mem_flags ) {
-      display_host_mem = j;
-    }
-  }
-  TRACE("Selected render mem: " << render_host_mem << ";" << render_local_mem << " display: " << display_host_mem);
-
-  return std::make_tuple(render_local_mem, render_host_mem, display_host_mem);
+  TRACE("ERROR, no suitable image memory found for " << image_type);
+  throw std::runtime_error("No suitable image memory found.");
 }
 
 void ImageWorker::createCommandBuffers(){
