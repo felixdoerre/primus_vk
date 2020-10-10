@@ -11,7 +11,15 @@ VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(
     uint32_t* pSurfaceFormatCount,
     VkSurfaceFormatKHR* pSurfaceFormats) {
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormatsKHR(phy, surface, pSurfaceFormatCount, pSurfaceFormats);
+  auto result = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormatsKHR(phy, surface, pSurfaceFormatCount, pSurfaceFormats);
+  TRACE("Querying surface formats (base) returned: " << result);
+  if( result == VK_SUCCESS && pSurfaceFormats) {
+    TRACE("Querying surface formats: " << *pSurfaceFormatCount);
+    for(uint32_t i = 0; i < *pSurfaceFormatCount; i++){
+      TRACE("Result: " << pSurfaceFormats[i].format << ";" << pSurfaceFormats[i].colorSpace);
+    }
+  }
+  return result;
 }	    
     VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfacePresentModesKHR(
     VkPhysicalDevice physicalDevice,
@@ -49,6 +57,14 @@ VkResult VKAPI_CALL PrimusVK_GetPhysicalDeviceSurfaceCapabilitiesKHR(
     uint32_t* pSurfaceFormatCount,
     VkSurfaceFormat2KHR* pSurfaceFormats) {
   VkPhysicalDevice phy = instance_info[GetKey(physicalDevice)].display;
-  return instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormats2KHR(phy, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
+  auto result = instance_dispatch[GetKey(phy)].GetPhysicalDeviceSurfaceFormats2KHR(phy, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
+  TRACE("Querying surface formats returned: " << result);
+  if( result == VK_SUCCESS && pSurfaceFormats) {
+    TRACE("Querying surface formats: " << *pSurfaceFormatCount);
+    for(uint32_t i = 0; i < *pSurfaceFormatCount; i++){
+      TRACE("Result: " << pSurfaceFormats[i].surfaceFormat.format << ";" << pSurfaceFormats[i].surfaceFormat.colorSpace);
+    }
+  }
+  return result;
 }	    
     

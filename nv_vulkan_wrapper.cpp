@@ -11,7 +11,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersi
 #define NV_DRIVER_PATH "/usr/lib/x86_64-linux-gnu/nvidia/libGL.so.1:libGLX_nvidia.so.0"
 #endif
 #ifndef NV_BUMBLEBEE_DISPLAY
-#define NV_BUMBLEBEE_DISPLAY ":8"
+#define NV_BUMBLEBEE_DISPLAY "hello"
 #endif
 
 typedef void* dlsym_fn(void *, const char*);
