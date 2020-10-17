@@ -126,7 +126,7 @@ private:
       TRACE("  Type: " << props.deviceType);
       return true;
     }
-    if(props.vendorID == vendor){
+    if(props.vendorID == vendor && device == 0){
       TRACE("Got device from env! (via vendorID)");
       TRACE("Device: " << props.deviceName);
       TRACE("  Type: " << props.deviceType);
@@ -285,6 +285,7 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
   auto res = my_instance_info.searchDevices(dispatchTable);
   if(res != VK_SUCCESS) return res;
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
+  FORWARD(GetPhysicalDeviceSurfaceCapabilities2KHR);
   FORWARD(GetPhysicalDeviceMemoryProperties);
   FORWARD(GetPhysicalDeviceQueueFamilyProperties);
 #ifdef VK_USE_PLATFORM_XCB_KHR
@@ -489,6 +490,8 @@ struct PrimusSwapchain{
   std::vector<ImageWorker> images;
   VkExtent2D imgSize;
 
+  VkSurfaceCapabilitiesKHR surfaceCapabilities = { };
+
   std::vector<std::unique_ptr<std::thread>> threads;
 
   std::shared_ptr<CreateOtherDevice> cod;
@@ -500,6 +503,9 @@ struct PrimusSwapchain{
     device_dispatch[GetKey(display_device)].GetDeviceQueue(display_device, myInstance.displayQueueFamilyIndex, 0, &display_queue);
     GetKey(render_queue) = GetKey(device); // TODO, use vkSetDeviceLoaderData instead
     GetKey(display_queue) = GetKey(display_device);
+
+    instance_dispatch[GetKey(myInstance.instance)].GetPhysicalDeviceSurfaceCapabilitiesKHR(myInstance.display, pCreateInfo->surface, &surfaceCapabilities);
+    TRACE("Min Images: " << surfaceCapabilities.minImageCount);
 
     uint32_t image_count;
     device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &image_count, nullptr);
@@ -546,6 +552,7 @@ struct PrimusSwapchain{
   void present(const QueueItem &workItem);
   void run();
   void stop();
+  void waitForReady();
 };
 
 ImageWorker::ImageWorker(PrimusSwapchain &swapchain, VkImage display_image, const VkSwapchainCreateInfoKHR &createInfo): swapchain(swapchain), render_copy_fence(swapchain.device), display_semaphore(swapchain.display_device), display_image(display_image){
@@ -702,13 +709,13 @@ void ImageWorker::initImages( const VkSwapchainCreateInfoKHR &createInfo){
   auto &renderCopyImage = render_copy_image;
   auto &displaySrcImage = display_src_image;
   renderImage = std::make_shared<FramebufferImage>(swapchain.device, imgSize,
-    VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, format,
+    VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, format,
     [this](uint32_t memoryTypeBits){ return swapchain.getImageMemory(ImageType::RENDER_TARGET_IMAGE, memoryTypeBits); });
   renderCopyImage = std::make_shared<FramebufferImage>(swapchain.device, imgSize,
     VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_DST_BIT, format,
     [this](uint32_t memoryTypeBits){ return swapchain.getImageMemory(ImageType::RENDER_COPY_IMAGE, memoryTypeBits); });
   displaySrcImage = std::make_shared<FramebufferImage>(swapchain.display_device, imgSize,
-    VK_IMAGE_TILING_LINEAR,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, format,
+    VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, format,
     [this](uint32_t memoryTypeBits){ return swapchain.getImageMemory(ImageType::DISPLAY_IMAGE, memoryTypeBits); });
 
   renderCopyImage->map();
@@ -934,18 +941,16 @@ VkResult VKAPI_CALL PrimusVK_GetSwapchainImagesKHR(VkDevice device, VkSwapchainK
 }
 
 const auto primus_start = std::chrono::steady_clock::now();
-
 VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex) {
   TRACE_PROFILING_EVENT(-1, "Acquire starting");
   PrimusSwapchain *ch = reinterpret_cast<PrimusSwapchain*>(pAcquireInfo->swapchain);
+
   auto timeout = pAcquireInfo->timeout;
-  if(timeout == UINT64_MAX ) {
-    timeout = uint64_t(1000) * 1000 * 1000 * 60; // 1 minute
-  }
   VkResult res;
   {
     Fence myfence{ch->display_device};
 
+    ch->waitForReady();
     res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, timeout, VK_NULL_HANDLE, myfence.fence, pImageIndex);
     TRACE_PROFILING_EVENT(*pImageIndex, "got image");
     if(res != VK_SUCCESS) {
@@ -1152,6 +1157,12 @@ void PrimusSwapchain::queue(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
   work.push_back(std::move(workItem));
   has_work.notify_all();
 }
+
+void PrimusSwapchain::waitForReady() {
+  std::unique_lock<std::mutex> lock(queueMutex);
+  has_work.wait(lock, [this](){return work.size() + in_progress.size()  <= images.size() - surfaceCapabilities.minImageCount;});
+}
+
 void PrimusSwapchain::stop(){
   {
     std::unique_lock<std::mutex> lock(queueMutex);
