@@ -157,7 +157,7 @@ public:
     for(auto &dev: physicalDevices){
       VkPhysicalDeviceProperties props;
       dispatchTable.GetPhysicalDeviceProperties(dev, &props);
-      TRACE(dev << ": ");
+      TRACE(dev << ": " << props.vendorID << ";" << props.deviceID);
       if(IsDevice(props, displayVendorID, displayDeviceID, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)){
 	display = dev;
 	break;
