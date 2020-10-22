@@ -1,6 +1,9 @@
 #include <vulkan.h>
 #include <dlfcn.h>
 
+#include <GL/gl.h>
+#include <GL/glx.h>
+
 #include <string>
 #include <iostream>
 
@@ -15,6 +18,12 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersi
 #endif
 
 typedef void* dlsym_fn(void *, const char*);
+
+#define GLX_CONTEXT_MAJOR_VERSION_ARB		0x2091
+#define GLX_CONTEXT_MINOR_VERSION_ARB		0x2092
+typedef GLXContext (*GLXCREATECONTEXTATTRIBSARBPROC)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
+
+typedef void *(*getproc )(const char* name);
 
 class StaticInitialize {
   void *nvDriver;
@@ -32,31 +41,40 @@ public:
     // again asked to load libGL.
     glLibGL = dlopen("libGL.so.1", RTLD_GLOBAL | RTLD_NOW);
 
-    std::string drivers(NV_DRIVER_PATH);
-    while(!nvDriver && drivers.size() > 0){
-      auto end = drivers.find(':');
-      if(end == std::string::npos) {
-	nvDriver = dlopen(drivers.c_str(), RTLD_LOCAL | RTLD_LAZY);
-	drivers = "";
-      } else {
-	std::string this_driver = drivers.substr(0, end);
-	nvDriver = dlopen(this_driver.c_str(), RTLD_LOCAL | RTLD_LAZY);
-	drivers = drivers.substr(end+1);
-      }
-    }
-    if(!nvDriver) {
-      std::cerr << "PrimusVK: ERROR! Nvidia driver could not be loaded from '" NV_DRIVER_PATH "'.\n";
-      return;
-    }
-    void *libdl = dlopen("libdl.so.2", RTLD_LAZY);
-    // We explicitly want the real dlsym from libdl.so.2 because there are LD_PRELOAD libraries
-    // that override dlsym and mess with the return values. We explicitly ask for the real
-    // dlsym function, just to be safe.
-    dlsym_fn *real_dlsym = (dlsym_fn*) dlsym(libdl, "dlsym");
-    instanceProcAddr = (decltype(instanceProcAddr)) real_dlsym(nvDriver, "vk_icdGetInstanceProcAddr");
-    phyProcAddr = (decltype(phyProcAddr)) real_dlsym(nvDriver, "vk_icdGetPhysicalDeviceProcAddr");
-    negotiateVersion = (decltype(negotiateVersion)) real_dlsym(nvDriver, "vk_icdNegotiateLoaderICDInterfaceVersion");
-    dlclose(libdl);
+	Display *dpy = XOpenDisplay(NV_BUMBLEBEE_DISPLAY);
+
+	int nelements;
+	GLXFBConfig *fbc = glXChooseFBConfig(dpy, DefaultScreen(dpy), 0, &nelements);
+	static int attributeList[] = { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_RED_SIZE, 1, GLX_GREEN_SIZE, 1, GLX_BLUE_SIZE, 1, None };
+	XVisualInfo *vi = glXChooseVisual(dpy, DefaultScreen(dpy),attributeList);
+
+	XSetWindowAttributes swa;
+	swa.colormap = XCreateColormap(dpy, RootWindow(dpy, vi->screen), vi->visual, AllocNone);
+	swa.border_pixel = 0;
+	swa.event_mask = StructureNotifyMask;
+	auto win = XCreateWindow(dpy, RootWindow(dpy, vi->screen), 0, 0, 100, 100, 0, vi->depth, InputOutput, vi->visual, CWBorderPixel|CWColormap|CWEventMask, &swa);
+
+	GLXCREATECONTEXTATTRIBSARBPROC pfn_glXCreateContextAttribsARB = (GLXCREATECONTEXTATTRIBSARBPROC) glXGetProcAddress((const GLubyte*)"glXCreateContextAttribsARB");
+
+	int attribs[] = {
+		GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+		GLX_CONTEXT_MINOR_VERSION_ARB, 0,
+		0};
+
+	GLXContext ctx = pfn_glXCreateContextAttribsARB(dpy, *fbc, 0, true, attribs);
+	glXMakeCurrent (dpy, win, ctx);
+	getproc fn2 = (getproc) glXGetProcAddress((const GLubyte*) "glGetVkProcAddrNV");
+	void *glfn = fn2("vk_icdGetInstanceProcAddr");
+	std::cout << ctx << std::endl;
+
+    instanceProcAddr = (decltype(instanceProcAddr)) fn2("vk_icdGetInstanceProcAddr");
+    phyProcAddr = (decltype(phyProcAddr)) fn2("vk_icdGetPhysicalDeviceProcAddr");
+    negotiateVersion = (decltype(negotiateVersion)) fn2("vk_icdNegotiateLoaderICDInterfaceVersion");
+	glXDestroyContext(dpy, ctx); 
+	XFree(vi);
+	XFree(fbc);
+	XDestroyWindow(dpy, win);
+	XCloseDisplay(dpy);
   }
   ~StaticInitialize(){
     if(nvDriver)
@@ -88,10 +106,5 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersi
   if (!init.IsInited()) {
     return VK_ERROR_INCOMPATIBLE_DRIVER;
   }
-  char *prev = getenv("DISPLAY");
-  std::string old{prev};
-  setenv("DISPLAY", NV_BUMBLEBEE_DISPLAY, 1);
-  auto res = init.negotiateVersion(pSupportedVersion);
-  setenv("DISPLAY",old.c_str(), 1);
-  return res;
+  return init.negotiateVersion(pSupportedVersion);
 }
