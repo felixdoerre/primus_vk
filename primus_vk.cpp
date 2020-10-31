@@ -282,8 +282,6 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
 #undef FORWARD
 
   auto my_instance_info = InstanceInfo{*pInstance, layerCreateDevice, layerDestroyDevice};
-  auto res = my_instance_info.searchDevices(dispatchTable);
-  if(res != VK_SUCCESS) return res;
 #define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
   FORWARD(GetPhysicalDeviceSurfaceCapabilities2KHR);
   FORWARD(GetPhysicalDeviceMemoryProperties);
@@ -1367,6 +1365,10 @@ VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
   }
   scoped_lock l(global_lock);
   InstanceInfo &info = instance_info[GetKey(instance)];
+  if(info.render == VK_NULL_HANDLE){
+    auto res = info.searchDevices(instance_dispatch[GetKey(instance)]);
+    if(res != VK_SUCCESS) return res;
+  }
   pPhysicalDevices[0] = info.render;
   *pPhysicalDeviceCount = cnt;
   return VK_SUCCESS;
