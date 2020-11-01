@@ -1359,15 +1359,15 @@ VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDevices(
     uint32_t*                                   pPhysicalDeviceCount,
     VkPhysicalDevice*                           pPhysicalDevices){
   const int cnt = 1;
-  if(pPhysicalDevices == nullptr){
-    *pPhysicalDeviceCount = cnt;
-    return VK_SUCCESS;
-  }
   scoped_lock l(global_lock);
   InstanceInfo &info = instance_info[GetKey(instance)];
   if(info.render == VK_NULL_HANDLE){
     auto res = info.searchDevices(instance_dispatch[GetKey(instance)]);
     if(res != VK_SUCCESS) return res;
+  }
+  if(pPhysicalDevices == nullptr){
+    *pPhysicalDeviceCount = cnt;
+    return VK_SUCCESS;
   }
   pPhysicalDevices[0] = info.render;
   *pPhysicalDeviceCount = cnt;
