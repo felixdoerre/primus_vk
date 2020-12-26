@@ -1,7 +1,6 @@
 #include <vulkan.h>
 #include <dlfcn.h>
 
-#include <GL/gl.h>
 #include <GL/glx.h>
 
 #include <string>
