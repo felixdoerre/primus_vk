@@ -479,6 +479,7 @@ struct ImageWorker {
   void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
 };
 struct PrimusSwapchain{
+  int max_fps = 0;
   InstanceInfo &myInstance;
   std::chrono::steady_clock::time_point lastPresent = std::chrono::steady_clock::now();
   VkDevice device;
@@ -506,6 +507,10 @@ struct PrimusSwapchain{
 
     instance_dispatch[GetKey(myInstance.instance)].GetPhysicalDeviceSurfaceCapabilitiesKHR(myInstance.display, pCreateInfo->surface, &surfaceCapabilities);
     TRACE("Min Images: " << surfaceCapabilities.minImageCount);
+    char *max_fps_env = getenv("PRIMUS_VK_MAX_FPS");
+    if(max_fps_env != nullptr){
+      max_fps = std::stoi(std::string{max_fps_env});
+    }
 
     uint32_t image_count;
     device_dispatch[GetKey(display_device)].GetSwapchainImagesKHR(display_device, backend, &image_count, nullptr);
@@ -1225,7 +1230,7 @@ VkResult VKAPI_CALL PrimusVK_QueueSubmit(VkQueue queue, uint32_t submitCount,
 
 VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
   scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
-  const auto start = std::chrono::steady_clock::now();
+  auto start = std::chrono::steady_clock::now();
   if(pPresentInfo->swapchainCount != 1){
     TRACE("Warning, presenting with multiple swapchains not implemented, ignoring");
   }
@@ -1234,7 +1239,15 @@ VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoK
   double secs = std::chrono::duration_cast<std::chrono::duration<double>>(start - ch->lastPresent).count();
   TRACE_PROFILING_EVENT(pPresentInfo->pImageIndices[0], "QueuePresent");
   TRACE_PROFILING(" === Time between VkQueuePresents: " << secs << " -> " << 1/secs << " FPS");
-  ch->lastPresent = start;
+  if(ch->max_fps != 0) {
+    const auto timeBetweenFrame = std::chrono::milliseconds(1000) / ch->max_fps;
+    const auto toSleep = ch->lastPresent + timeBetweenFrame - start;
+    if(toSleep > std::chrono::seconds(0)){
+      std::this_thread::sleep_for(toSleep);
+      start = std::chrono::steady_clock::now();
+    }
+    ch->lastPresent = start;
+  }
 
   ch->queue(queue, pPresentInfo);
 
