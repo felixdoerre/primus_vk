@@ -1223,7 +1223,7 @@ VkResult VKAPI_CALL PrimusVK_QueueSubmit(VkQueue queue, uint32_t submitCount,
 
 VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
   scoped_lock lock(*device_instance_info[GetKey(queue)]->renderQueueMutex);
-  const auto start = std::chrono::steady_clock::now();
+  auto start = std::chrono::steady_clock::now();
   if(pPresentInfo->swapchainCount != 1){
     TRACE("Warning, presenting with multiple swapchains not implemented, ignoring");
   }
@@ -1232,6 +1232,12 @@ VkResult VKAPI_CALL PrimusVK_QueuePresentKHR(VkQueue queue, const VkPresentInfoK
   double secs = std::chrono::duration_cast<std::chrono::duration<double>>(start - ch->lastPresent).count();
   TRACE_PROFILING_EVENT(pPresentInfo->pImageIndices[0], "QueuePresent");
   TRACE_PROFILING(" === Time between VkQueuePresents: " << secs << " -> " << 1/secs << " FPS");
+  const auto timeBetweenFrame = std::chrono::milliseconds(1000) / 60;
+  const auto toSleep = ch->lastPresent + timeBetweenFrame - start;
+  if(toSleep > std::chrono::seconds(0)){
+    std::this_thread::sleep_for(toSleep);
+    start = std::chrono::steady_clock::now();
+  }
   ch->lastPresent = start;
 
   ch->queue(queue, pPresentInfo);
