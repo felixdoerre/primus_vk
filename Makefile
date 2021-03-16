@@ -11,7 +11,7 @@ sysconfdir    = $(PREFIX)/etc
 datarootdir   = ${PREFIX}/share
 datadir       = ${datarootdir}
 
-override CXXFLAGS += --std=gnu++11 -g3
+override CXXFLAGS += --std=c++17 -g3
 
 all: libprimus_vk.so libnv_vulkan_wrapper.so
 
@@ -30,7 +30,7 @@ primus_vk_forwarding_prototypes.h:
 primus_vk.cpp: primus_vk_forwarding.h primus_vk_forwarding_prototypes.h
 
 primus_vk_diag: primus_vk_diag.o
-	$(CXX) -g3 -o $@ $^ -lX11 -lvulkan -ldl $(LDFLAGS)
+	$(CXX) -g3 -o $@ $^ -lX11 -lvulkan -ldl -lpthread $(LDFLAGS)
 
 clean:
 	rm -f libnv_vulkan_wrapper.so libprimus_vk.so
