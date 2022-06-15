@@ -37,7 +37,7 @@ public:
   BBGLXContext(const char* display){
     dpy = XOpenDisplay(display);
     if(!dpy){
-      std::cout << "Can't open bumblebee display.\n";
+      std::cerr << "Can't open bumblebee display.\n";
       return;
     }
     

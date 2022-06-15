@@ -54,7 +54,7 @@ void *&GetKey(DispatchableType inst)
 class CreateOtherDevice;
 
 // #define TRACE(x)
-#define TRACE(x) std::cout << "PrimusVK: " << x << "\n";
+#define TRACE(x) std::cerr << "PrimusVK: " << x << "\n";
 #define TRACE_PROFILING(x)
 // #define TRACE_PROFILING(x) std::cout << "PrimusVK: " << x << "\n";
 #define TRACE_PROFILING_EVENT(x, y)
