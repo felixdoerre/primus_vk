@@ -31,6 +31,8 @@
 #include <chrono>
 #include <functional>
 
+#include <X11/extensions/Xrandr.h>
+
 #undef VK_LAYER_EXPORT
 #if defined(WIN32)
 #define VK_LAYER_EXPORT extern "C" __declspec(dllexport)
@@ -785,7 +787,10 @@ VkResult VKAPI_CALL PrimusVK_CreateDevice(
   VkResult ret = createFunc(physicalDevice, pCreateInfo, pAllocator, pDevice);
   cod->setRenderDevice(*pDevice);
   my_instance_info.cod[GetKey(*pDevice)] = cod;
-
+  if(ret != VK_SUCCESS){
+    TRACE("Render Device creation failed: " << ret);
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
   // store the table by key
   {
     scoped_lock l(global_lock);
@@ -951,9 +956,6 @@ VkResult VKAPI_CALL PrimusVK_AcquireNextImage2KHR(VkDevice device, const VkAcqui
     ch->waitForReady();
     res = device_dispatch[GetKey(ch->display_device)].AcquireNextImageKHR(ch->display_device, ch->backend, timeout, VK_NULL_HANDLE, myfence.fence, pImageIndex);
     TRACE_PROFILING_EVENT(*pImageIndex, "got image");
-    if(res != VK_SUCCESS) {
-      return res;
-    }
     myfence.await();
   }
   VkSubmitInfo qsi{};
@@ -1342,8 +1344,10 @@ VkResult VKAPI_CALL PrimusVK_EnumerateDeviceExtensionProperties(
   // pass through any queries that aren't to us
   if(pLayerName == NULL || strcmp(pLayerName, "VK_LAYER_PRIMUS_PrimusVK"))
   {
-    if(physicalDevice == VK_NULL_HANDLE)
+    if(physicalDevice == VK_NULL_HANDLE) {
+      *pPropertyCount = 0;
       return VK_SUCCESS;
+    }
 
     scoped_lock l(global_lock);
     return instance_dispatch[GetKey(physicalDevice)].EnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pPropertyCount, pProperties);
@@ -1395,6 +1399,15 @@ VkResult VKAPI_CALL PrimusVK_EnumeratePhysicalDeviceGroupsKHR(
   return PrimusVK_EnumeratePhysicalDeviceGroups(instance, pPhysicalDeviceGroupCount, pPhysicalDeviceGroupProperties);
 }
 
+VkResult VKAPI_CALL PrimusVK_GetRandROutputDisplayEXT(
+    VkPhysicalDevice                            physicalDevice,
+    Display*                                    dpy,
+    RROutput                                    rrOutput,
+    VkDisplayKHR*                               pDisplay){
+  TRACE("Surpressing GetRandROutputDisplay");
+  *pDisplay = VK_NULL_HANDLE;
+  return VK_SUCCESS;
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // GetProcAddr functions, entry points of the layer
@@ -1421,6 +1434,7 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetDeviceProcAddr(VkDevic
   GETPROCADDR(QueueSubmit);
   GETPROCADDR(DeviceWaitIdle);
   GETPROCADDR(QueueWaitIdle);
+  GETPROCADDR(GetRandROutputDisplayEXT);
 #define FORWARD(func) GETPROCADDR(func)
   FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
 #include "primus_vk_forwarding.h"
@@ -1461,6 +1475,7 @@ VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkIns
   GETPROCADDR(QueueSubmit);
   GETPROCADDR(DeviceWaitIdle);
   GETPROCADDR(QueueWaitIdle);
+  GETPROCADDR(GetRandROutputDisplayEXT);
   GETPROCADDR(GetPhysicalDeviceQueueFamilyProperties);
 #ifdef VK_USE_PLATFORM_XCB_KHR
   GETPROCADDR(GetPhysicalDeviceXcbPresentationSupportKHR);
