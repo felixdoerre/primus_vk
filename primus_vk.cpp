@@ -1194,7 +1194,7 @@ void PrimusSwapchain::present(const QueueItem &workItem){
       has_work.wait(lock, [this,&workItem](){return &workItem == &in_progress.front();});
       TRACE_PROFILING_EVENT(index, "submitting");
       VkResult res = device_dispatch[GetKey(display_device)].QueuePresentKHR(display_queue, &p2);
-      if(res != VK_SUCCESS) {
+      if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
 	TRACE("ERROR, Queue Present failed: " << res << "\n");
       }
       in_progress.pop_front();
