@@ -478,9 +478,6 @@ struct ImageWorker {
   void createCommandBuffers();
   void copyImageData(uint32_t idx, std::vector<VkSemaphore> sems);
 };
-#include <sys/mman.h>
-#include <fcntl.h>
-#include <unistd.h>
 struct PrimusSwapchain{
   int max_fps = 0;
   InstanceInfo &myInstance;
@@ -502,8 +499,6 @@ struct PrimusSwapchain{
 
   bool suppress_suboptimal = false;
 
-  void *addr = 0;
-  
   PrimusSwapchain(PrimusSwapchain &) = delete;
   PrimusSwapchain(InstanceInfo &myInstance, VkDevice device, VkDevice display_device, VkSwapchainKHR backend, const VkSwapchainCreateInfoKHR *pCreateInfo, std::shared_ptr<CreateOtherDevice> &cod):
     myInstance(myInstance), device(device), display_device(display_device), backend(backend), cod(cod){
@@ -536,10 +531,6 @@ struct PrimusSwapchain{
       images.emplace_back(*this, display_images[i], *pCreateInfo);
     }
 
-    int fd = open("/dev/shm/pvkimg", O_RDWR);
-    ftruncate(fd, images[0].display_src_image->getLayout().size+16);
-    addr = mmap(NULL, images[0].display_src_image->getLayout().size+16, PROT_READ | PROT_WRITE,
-                       MAP_SHARED, fd, 0); 
     TRACE("Creating a Swapchain thread.");
     size_t thread_count = 1;
     char *m_env = getenv("PRIMUS_VK_MULTITHREADING");
@@ -1147,11 +1138,6 @@ void ImageWorker::copyImageData(uint32_t index, std::vector<VkSemaphore> sems){
     
     if(rendered_layout.rowPitch == display_layout.rowPitch){
       std::memcpy(display_start, rendered_start, rendered_layout.size);
-      if(*reinterpret_cast<int*>(swapchain.addr) == 1){
-	reinterpret_cast<int*>(swapchain.addr)[0] = 0;
-	reinterpret_cast<int*>(swapchain.addr)[1] = rendered_layout.rowPitch;
-	std::memcpy(reinterpret_cast<char*>(swapchain.addr)+16, rendered_start, rendered_layout.size);
-      }
     }else{
       VkDeviceSize display_offset = 0;
       VkDeviceSize minRowPitch = rendered_layout.rowPitch;
