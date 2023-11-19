@@ -11,12 +11,12 @@ sysconfdir    = $(PREFIX)/etc
 datarootdir   = ${PREFIX}/share
 datadir       = ${datarootdir}
 
-override CXXFLAGS += --std=c++17 -g3 -I/usr/include/vulkan -I/usr/include/vulkan/generated
+override CXXFLAGS += --std=c++17 -g3 -I/usr/include/vulkan
 
 all: libprimus_vk.so libnv_vulkan_wrapper.so
 
-libprimus_vk.so: primus_vk.cpp
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -shared -fPIC $^ -o $@ -Wl,-soname,libprimus_vk.so.1 -ldl -lpthread $(LDFLAGS)
+libprimus_vk.so: primus_vk.cpp  primus_vk_forwarding.h primus_vk_forwarding_prototypes.h primus_vk_dispatch_table.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -shared -fPIC primus_vk.cpp -o $@ -Wl,-soname,libprimus_vk.so.1 -ldl -lpthread $(LDFLAGS)
 
 libnv_vulkan_wrapper.so: nv_vulkan_wrapper.cpp
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -shared -fPIC $^ -o $@ -Wl,-soname,libnv_vulkan_wrapper.so.1 -lX11 -lGLX -ldl $(LDFLAGS)
@@ -26,8 +26,6 @@ primus_vk_forwarding.h:
 
 primus_vk_forwarding_prototypes.h:
 	xsltproc surface_forwarding_prototypes.xslt /usr/share/vulkan/registry/vk.xml | tail -n +2 > $@
-
-primus_vk.cpp: primus_vk_forwarding.h primus_vk_forwarding_prototypes.h
 
 primus_vk_diag: primus_vk_diag.o
 	$(CXX) -g3 -o $@ $^ -lX11 -lvulkan -ldl -lpthread $(LDFLAGS)

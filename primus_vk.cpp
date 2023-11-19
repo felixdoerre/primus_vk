@@ -4,7 +4,7 @@
 #include "vulkan.h"
 #include "vk_layer.h"
 
-#include "vk_layer_dispatch_table.h"
+#include "primus_vk_dispatch_table.h"
 
 #include <cassert>
 #include <cstring>
@@ -138,7 +138,7 @@ private:
   }
 
 public:
-  VkResult searchDevices(VkLayerInstanceDispatchTable &dispatchTable){
+  VkResult searchDevices(PvkInstanceDispatchTable &dispatchTable){
     uint32_t displayVendorID = 0;
     uint32_t displayDeviceID = 0;
     uint32_t renderVendorID = 0;
@@ -201,7 +201,7 @@ public:
     }
     return VK_SUCCESS;
   }
-  VkResult getQueueFamilyIndex(VkPhysicalDevice device, VkLayerInstanceDispatchTable &dispatchTable, uint32_t *queueFamilyIndex) {
+  VkResult getQueueFamilyIndex(VkPhysicalDevice device, PvkInstanceDispatchTable &dispatchTable, uint32_t *queueFamilyIndex) {
     uint32_t display_queue_count = 0;
     dispatchTable.GetPhysicalDeviceQueueFamilyProperties(device, &display_queue_count, nullptr);
     auto displayQueueProperties = std::vector<VkQueueFamilyProperties>(display_queue_count);
@@ -224,18 +224,17 @@ public:
   }
 };
 
-std::map<void *, VkLayerInstanceDispatchTable> instance_dispatch;
-VkLayerInstanceDispatchTable loader_dispatch;
+std::map<void *, PvkInstanceDispatchTable> instance_dispatch;
 // VkInstance->disp is beeing malloc'ed for every new instance
 // so we can assume it to be a good key.
 std::map<void *, InstanceInfo> instance_info;
 
 std::map<void *, InstanceInfo*> device_instance_info;
-std::map<void *, VkLayerDispatchTable> device_dispatch;
+std::map<void *, PvkDispatchTable> device_dispatch;
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Layer init and shutdown
-VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice);
+PvkDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice);
 VK_LAYER_EXPORT PFN_vkVoidFunction VKAPI_CALL PrimusVK_GetInstanceProcAddr(VkInstance instance, const char *pName);
 VkResult VKAPI_CALL PrimusVK_CreateInstance(
     const VkInstanceCreateInfo*                 pCreateInfo,
@@ -273,39 +272,14 @@ VkResult VKAPI_CALL PrimusVK_CreateInstance(
   VK_CHECK_RESULT( createFunc(pCreateInfo, pAllocator, pInstance) );
 
   // fetch our own dispatch table for the functions we need, into the next layer
-  VkLayerInstanceDispatchTable dispatchTable;
-  dispatchTable.GetInstanceProcAddr = gpa;
-#define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
-  FORWARD(EnumeratePhysicalDevices);
-  FORWARD(DestroyInstance);
-  FORWARD(EnumerateDeviceExtensionProperties);
-  FORWARD(GetPhysicalDeviceProperties);
-  FORWARD(GetPhysicalDeviceQueueFamilyProperties);
-#undef FORWARD
-
+  PvkInstanceDispatchTable dispatchTable = {pInstance, gpa};
   auto my_instance_info = InstanceInfo{*pInstance, layerCreateDevice, layerDestroyDevice};
-#define FORWARD(func) dispatchTable.func = (PFN_vk##func)gpa(*pInstance, "vk" #func);
-  FORWARD(GetPhysicalDeviceSurfaceCapabilities2KHR);
-  FORWARD(GetPhysicalDeviceMemoryProperties);
-  FORWARD(GetPhysicalDeviceQueueFamilyProperties);
-#ifdef VK_USE_PLATFORM_XCB_KHR
-  FORWARD(GetPhysicalDeviceXcbPresentationSupportKHR);
-#endif
-#ifdef VK_USE_PLATFORM_XLIB_KHR
-  FORWARD(GetPhysicalDeviceXlibPresentationSupportKHR);
-#endif
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-  FORWARD(GetPhysicalDeviceWaylandPresentationSupportKHR);
-#endif
-  FORWARD(GetPhysicalDeviceSurfaceSupportKHR);
-#include "primus_vk_forwarding.h"
-#undef FORWARD
 
   // store the table by key
   {
     scoped_lock l(global_lock);
 
-    instance_dispatch[GetKey(*pInstance)] = dispatchTable;
+    instance_dispatch.insert({GetKey(*pInstance), dispatchTable});
     instance_info[GetKey(*pInstance)] = std::move(my_instance_info);
   }
 
@@ -790,7 +764,7 @@ VkResult VKAPI_CALL PrimusVK_CreateDevice(
     {
       scoped_lock l(global_lock);
       device_instance_info[GetKey(dev)] = &my_instance_info;
-      device_dispatch[GetKey(dev)] = fetchDispatchTable(gdpa, &dev);
+      device_dispatch.insert({GetKey(dev),fetchDispatchTable(gdpa, &dev)});
     }
     return ret;
   });
@@ -806,7 +780,7 @@ VkResult VKAPI_CALL PrimusVK_CreateDevice(
   {
     scoped_lock l(global_lock);
     device_instance_info[GetKey(*pDevice)] = &my_instance_info;
-    device_dispatch[GetKey(*pDevice)] = fetchDispatchTable(gdpa, pDevice);
+    device_dispatch.insert({GetKey(*pDevice), fetchDispatchTable(gdpa, pDevice)});
   }
   TRACE("CreateDevice done");
 
@@ -814,64 +788,10 @@ VkResult VKAPI_CALL PrimusVK_CreateDevice(
 
 }
 
-VkLayerDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice){
+PvkDispatchTable fetchDispatchTable(PFN_vkGetDeviceProcAddr gdpa, VkDevice *pDevice){
   TRACE("fetching dispatch for " << GetKey(*pDevice));
   // fetch our own dispatch table for the functions we need, into the next layer
-  VkLayerDispatchTable dispatchTable;
-  dispatchTable.GetDeviceProcAddr = gdpa;
-#define FETCH(x) dispatchTable.x = (PFN_vk##x) gdpa(*pDevice, "vk" #x);
-  FETCH(DestroyDevice);
-  FETCH(BeginCommandBuffer);
-  FETCH(CmdDraw);
-  FETCH(CmdDrawIndexed);
-  FETCH(EndCommandBuffer);
-
-  FETCH(CreateSwapchainKHR);
-  FETCH(DestroySwapchainKHR);
-  FETCH(GetSwapchainImagesKHR);
-  FETCH(AcquireNextImageKHR);
-  FETCH(GetSwapchainStatusKHR);
-  FETCH(QueuePresentKHR);
-
-  FETCH(CreateImage);
-  FETCH(GetImageMemoryRequirements);
-  FETCH(AllocateMemory);
-  FETCH(BindImageMemory);
-  FETCH(GetImageSubresourceLayout);
-  FETCH(FreeMemory);
-  FETCH(DestroyImage);
-  FETCH(MapMemory);
-  FETCH(UnmapMemory);
-
-
-  FETCH(AllocateCommandBuffers);
-  FETCH(BeginCommandBuffer);
-  FETCH(CmdCopyImage);
-  FETCH(CmdPipelineBarrier);
-  FETCH(CreateCommandPool);
-  //FETCH(CreateDevice);
-  FETCH(EndCommandBuffer);
-  //FETCH(EnumeratePhysicalDevices);
-  FETCH(FreeCommandBuffers);
-  FETCH(DestroyCommandPool);
-  //FETCH(GetPhysicalDeviceMemoryProperties);
-  FETCH(QueueSubmit);
-  FETCH(DeviceWaitIdle);
-  FETCH(QueueWaitIdle);
-
-  FETCH(GetDeviceQueue);
-
-  FETCH(CreateFence);
-  FETCH(WaitForFences);
-  FETCH(ResetFences);
-  FETCH(DestroyFence);
-
-  FETCH(CreateSemaphore);
-  FETCH(DestroySemaphore);
-
-  FETCH(InvalidateMappedMemoryRanges);
-
-#undef FETCH
+  PvkDispatchTable dispatchTable = {pDevice, gdpa};
   return dispatchTable;
 }
 
