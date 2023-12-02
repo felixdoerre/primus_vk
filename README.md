@@ -9,6 +9,8 @@ It is basically the same as Primus for OpenGL (https://github.com/amonakov/primu
 First you need to install `primus_vk`:
  * On Archlinux there are official packages ([for 64-bit games](https://archlinux.org/packages/extra/x86_64/primus_vk/), [for 32-bit games](https://archlinux.org/packages/multilib/x86_64/lib32-primus_vk/)).
  * On Debian (from bullseye on) you should use `primus-vk-nvidia` (which recommends also the 32-bit variants of those packages for 32-bit games), which already is preconfigured for the Nvidia dedicated + Intel integrated graphics setup. When you have a different setup, you should install just `primus-vk` (which installs only the bare `primus_vk`-library and no graphics drivers), and install the Vulkan drivers, you need manually.
+ * For Gentoo Linux and affiliates distributions, an unoffical overlay branch is developed [here](https://ftp.pingwho.org/pub/gentoo/ftp/overlay/dbox2-overlay/x11-libs/primus_vk/).
+ This overlay branch supports multilib abi_x86_32 and abi_x86_64 for Vulkan applications on Intel/Nvidia Optimus configuration.
  * For Fedora there are [unofficial packages](https://copr.fedorainfracloud.org/coprs/yura/primus-vk/).
  * For other distributions you will likely need to [manually install](#installation) `primus_vk`.
 
