@@ -1296,7 +1296,31 @@ VkResult VKAPI_CALL PrimusVK_EnumerateDeviceExtensionProperties(
     }
 
     scoped_lock l(global_lock);
-    return instance_dispatch[GetKey(physicalDevice)].EnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pPropertyCount, pProperties);
+    std::unique_ptr<std::vector<VkExtensionProperties>> extensions;
+    auto res = instance_dispatch[GetKey(physicalDevice)].EnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pPropertyCount, pProperties);
+    if(pProperties == nullptr && res == VK_SUCCESS) {
+      extensions = std::make_unique<std::vector<VkExtensionProperties>>(*pPropertyCount);
+      pProperties = extensions->data();
+      res = instance_dispatch[GetKey(physicalDevice)].EnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pPropertyCount, pProperties);
+    }
+    if(res != VK_SUCCESS) {
+      return res;
+    }
+    // Low_latency_2 has functions configuring a swapchain-device-combination.
+    // As primus_vk breaks this link, passing the extension through as-is fails.
+    // Implementing the extension seems non-trivial, so for now we skip it.
+    std::string toFilter = "VK_NV_low_latency2";
+    int foundAt = -1;
+    for(int i = 0; i < *pPropertyCount; i++) {
+      if(toFilter == pProperties[i].extensionName){
+	foundAt = i;
+      }
+    }
+    if(foundAt != -1){
+      std::copy(&pProperties[foundAt+1], &pProperties[*pPropertyCount], &pProperties[foundAt]);
+      *pPropertyCount--;
+    }
+    return res;
   }
 
   // don't expose any extensions
